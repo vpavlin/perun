@@ -1,9 +1,9 @@
-import { Outlet } from "react-router-dom";
-import Location from "../components/location";
+import { Link, Outlet } from "react-router-dom";
 
 const Main = () => {
     return (<>
-        <div className="overflow-hidden max-h-fit">          
+        <div className="overflow-hidden max-h-fit">
+            <Link to={"/run/"} className="btn btn-lg btn-primary">New</Link>       
             <Outlet />
         </div>
     </>)
