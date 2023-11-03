@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "../../hooks/useStore";
 import {sha256} from "js-sha256"
 import { RunItem, StoreItem } from "../../lib/types";
+import Overview from "./overview";
 
 interface IProps  {
     id: string
@@ -67,6 +68,9 @@ const Panel = ({id}: IProps) => {
     ])
     
     return (<>
+    { run && run.finishTimestamp ?
+        <Overview id={id} />
+        :
         <div className="rounded-t-xl absolute bottom-0 w-full p-4 bg-base-100 z-20 min-h-16 items-center justify-center text-center">
             { started?
                 <div className="flex flex-row">
@@ -86,6 +90,7 @@ const Panel = ({id}: IProps) => {
                     </div>
             }
         </div>
+    }
     </>)
 }
 

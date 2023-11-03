@@ -12,6 +12,7 @@
     "@types/react-dom": "^18.2.14",
     "daisyui": "^3.9.4",
     "ethers": "^6.8.1",
+    "haversine-distance": "^1.2.1",
     "js-sha256": "^0.10.1",
     "latlon-geohash": "^2.0.0",
     "postcss": "^8.4.31",
