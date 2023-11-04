@@ -7,6 +7,7 @@ import {sha256} from "js-sha256"
 import { RunItem, StoreItem } from "../../lib/types";
 import { distance_m, duration, filter, velocity_kph } from "../../lib/run";
 import Geohash from "latlon-geohash";
+import { download } from "../../lib/utils";
 
 interface IProps  {
     id: string
@@ -43,7 +44,7 @@ const Overview = ({id}: IProps) => {
                 cache = tcache
                 return p != undefined
         })
-            setPoints(filtered)
+            setPoints(points)
             setDistance(distance_m(filtered))
             
         })()
@@ -68,6 +69,9 @@ const Overview = ({id}: IProps) => {
                     </div>
                     <div>
                         {points.map((v) => <div>{v.loc.lat}, {v.loc.lon} ({Geohash.encode(v.loc.lat, v.loc.lon, 7)}</div>)}
+                    </div>
+                    <div>
+                        <button className="btn btn-lg btn-primary" onClick={() => download(`perun-${run.hash}.json`, points)}>Export</button>
                     </div>
                 </div>
             }
