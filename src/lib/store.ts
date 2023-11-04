@@ -46,7 +46,8 @@ export class Store<T> {
             const request = objectStore.add(msg)
             request.onerror = (evt) => {
                 console.error(evt)
-                reject()
+                //@ts-ignore
+                reject("Error while entering into db: "+ evt.target!.error)
             }
             request.onsuccess = (evt) => {
                 resolve(undefined)

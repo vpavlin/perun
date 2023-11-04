@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react"
-import useIdentity from "../../hooks/useIdentity"
 import getDispatcher, { DispatchMetadata, Dispatcher, Signer } from "waku-dispatcher"
 import { utils } from "@noble/secp256k1"
 import { useLocalStorage } from "usehooks-ts"

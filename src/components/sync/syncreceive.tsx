@@ -30,9 +30,15 @@ const SyncReceive = () => {
         if (!storeRuns || !storeGeo || !data) return
 
         (async () => {
-            await storeRuns.set(data.run)
-            for (const point of data.points) {
-                await storeGeo.set(point)
+            try {
+                await storeRuns.set(data.run)
+                for (const point of data.points) {
+                    await storeGeo.set(point)
+                }
+                setDone(true)
+
+            } catch (e) {
+                console.error(e)
             }
         })()
     }, [storeGeo, storeRuns, data])
@@ -47,7 +53,6 @@ const SyncReceive = () => {
             if (!d) return
             d.registerKey(utils.hexToBytes(privateKey))
             d.on("sync_data", async (payload: SyncData, signer: Signer, meta: DispatchMetadata) => {
-                console.log("Got data!")
                 setData(payload)
 
             }, true, true)

@@ -45,7 +45,6 @@ const Sync = ({run, points, publicKey}: IProps) => {
     useEffect(() => {
         if (!dispatcher || !wallet) return
         (async () => {
-            console.log(publicKey)
             await dispatcher.emit("sync_data", {run: run, points: points} as SyncData, wallet, {key: utils.hexToBytes(publicKey), type: 1})
         })()
     }, [dispatcher, wallet])

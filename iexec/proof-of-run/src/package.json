@@ -1,0 +1,21 @@
+{
+  "name": "proof-of-run",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc --build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "haversine-distance": "^1.2.1",
+    "latlon-geohash": "^2.0.0",
+    "typescript": "^5.2.2"
+  },
+  "devDependencies": {
+    "@types/latlon-geohash": "^2.0.2",
+    "@types/node": "^20.8.10"
+  }
+}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Wallet } from "ethers";
 
 
@@ -10,6 +10,8 @@ const useIdentity = (name?: string, password?:string) => {
     const [address, setAddress] = useState<string>()
     const [error, setError ] = useState<string>()
 
+    const initialized = useRef(false)
+
 
     if (!name) name = "identity"
 
@@ -20,7 +22,9 @@ const useIdentity = (name?: string, password?:string) => {
     } 
 
     useMemo(async () => {
-        if (!password || password == "") return
+        if (!password || password == "" || initialized.current) return
+
+        initialized.current = true
         let item = localStorage.getItem(storageKey)
         if (!item) {
             const w = Wallet.createRandom()

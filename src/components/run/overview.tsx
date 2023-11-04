@@ -5,10 +5,13 @@ import { useEffect, useState } from "react";
 import { useStore } from "../../hooks/useStore";
 import {sha256} from "js-sha256"
 import { PairingRequest, RunItem, StoreItem } from "../../lib/types";
-import { distance_m, duration, filter, velocity_kph } from "../../lib/run";
+import { distance_m, duration, filter, pace, velocity_kph } from "../../lib/run";
 import Geohash from "latlon-geohash";
 import { download } from "../../lib/utils";
 import Sync from "../sync/sync";
+import Prove from "./prove";
+import Moment from "react-moment";
+import moment from "moment";
 
 interface IProps  {
     id: string
@@ -20,6 +23,7 @@ const Overview = ({id}: IProps) => {
     const [duratio, setDuration] = useState<number>()
     const [distance, setDistance] = useState<number>()
     const [velocity, setVelocity] = useState<number>()
+    const [pace_min_km, setPace] = useState<number>()
     const [publicKey, setPublicKey] = useState<string>()
 
     const pairedAccounts = useReadLocalStorage<PairingRequest[]>(`${APP_PREFIX}-paired-accounts`)
@@ -41,7 +45,6 @@ const Overview = ({id}: IProps) => {
         if (!storeGeo) return
         (async () => {
             const points = await storeGeo.getAll(id)
-            console.log(points.length)
             let cache:string[] = []
             const filtered = points.filter((v) => {
                 const [p, tcache] = filter(v, cache)
@@ -62,6 +65,7 @@ const Overview = ({id}: IProps) => {
     useEffect(() => {
         if (!duratio || !distance) return
         setVelocity(velocity_kph(duratio, distance))
+        setPace(pace(duratio, distance))
     }, [distance, duratio])
 
 
@@ -71,10 +75,18 @@ const Overview = ({id}: IProps) => {
 
                 {run && points &&
                 <div>
-                    <div>
-                        <div>Duration: {duratio}s</div>
-                        <div>Distance: {(distance! / 1000).toPrecision(3)} km</div>
-                        <div>Velocity: {velocity}</div>
+                    <div className="flex justify-between text-left">
+                        <div className="flex-row">
+                            <div>Name: {run.name}</div>
+                            <div>Start <Moment>{run.startTimestamp}</Moment></div>
+                            <div>Finish <Moment>{run.finishTimestamp}</Moment></div>
+                        </div>
+                        <div className="flex-row">
+                            <div>Duration: {duratio}s</div>
+                            <div>Distance: {(distance! / 1000).toFixed(3)} km</div>
+                            <div>Velocity: {velocity?.toFixed(2)} km/h</div>
+                            <div>Pace: {moment().startOf('day').add(pace_min_km, 'm').format("mm:ss")} min/km</div>
+                        </div>
                     </div>
                     {false && 
                     <div className="max-h-[200px] overflow-y-scroll">
@@ -91,9 +103,10 @@ const Overview = ({id}: IProps) => {
                             <Sync run={run} points={points} publicKey={publicKey} />
                         }
                     </div>
-                    <div>
-                        <button className="btn btn-lg btn-primary" onClick={() => download(`perun-${run.hash}.json`, points)}>Export</button>
-                    </div>
+                    {false && <div>
+                        <button className="btn btn-lg btn-primary" onClick={() => download(`perun-${run!.hash}.json`, points)}>Export</button>
+                    </div>}
+                    <Prove points={points} run={run} />
                 </div>
             }
         </div>
