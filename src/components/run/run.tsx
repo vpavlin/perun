@@ -9,7 +9,7 @@ const Run = () => {
     return (
         <>
             <div className="relative min-h-[800px] h-full">
-                <Map />
+                <Map  id={id} />
                 { id ?
                     <Panel id={id} />
                     :
