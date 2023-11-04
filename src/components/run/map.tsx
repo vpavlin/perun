@@ -26,7 +26,12 @@ const Map = ({id}: IProps) => {
         (async () => {
             const points = await storeGeo.getAll(id)
             setPoints(points)
-            setPolyline(points.map((v) => [v.loc.lat, v.loc.lon]))
+            console.log(points)
+            setPolyline(points.sort((a, b) => {
+                if (a.loc.timestamp < b.loc.timestamp) return -1
+                if (a.loc.timestamp > b.loc.timestamp) return 1
+                return 0
+            }).map((v) => [v.loc.lat, v.loc.lon]))
         })()
     }, [storeGeo, id])
 
@@ -39,7 +44,7 @@ const Map = ({id}: IProps) => {
                 />
                 { points && polyline ?
                     //points.map((v) => <Marker key={v.hash} position={[v.loc.lat, v.loc.lon]} />)
-                    <Polyline positions={polyline}/>
+                    <Polyline positions={polyline} color="red" />
                 :
                     <Marker position={[loc.lat, loc.lon]} />
                 }

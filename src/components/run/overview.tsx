@@ -49,8 +49,12 @@ const Overview = ({id}: IProps) => {
                 cache = tcache
                 return p != undefined
         })
-            setPoints(points)
-            setDistance(distance_m(filtered))
+            setPoints(points.sort((a, b) => {
+                if (a.loc.timestamp < b.loc.timestamp) return -1
+                if (a.loc.timestamp > b.loc.timestamp) return 1
+                return 0
+            }))
+            setDistance(distance_m(points))
             
         })()
     }, [storeGeo])
@@ -69,12 +73,14 @@ const Overview = ({id}: IProps) => {
                 <div>
                     <div>
                         <div>Duration: {duratio}s</div>
-                        <div>Distance: {distance}</div>
+                        <div>Distance: {(distance! / 1000).toPrecision(3)} km</div>
                         <div>Velocity: {velocity}</div>
                     </div>
+                    {false && 
                     <div className="max-h-[200px] overflow-y-scroll">
-                        {points.map((v) => <div>{v.loc.lat}, {v.loc.lon} ({Geohash.encode(v.loc.lat, v.loc.lon, 7)}</div>)}
+                        {points!.map((v) => <div>{v.loc.lat}, {v.loc.lon} ({Geohash.encode(v.loc.lat, v.loc.lon, 7)}</div>)}
                     </div>
+                    }
                     <div>
                         
                         {pairedAccounts && <ul  tabIndex={0} className="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
