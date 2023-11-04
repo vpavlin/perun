@@ -16,11 +16,11 @@ const useIdentity = (name?: string, password?:string) => {
     const storageKey = `${name}-key`
     const progress = (percent: number) => {
         setPercent(Math.floor(percent * 100) )
+        console.log(percent)
     } 
 
     useMemo(async () => {
         if (!password || password == "") return
-        console.log(password)
         let item = localStorage.getItem(storageKey)
         if (!item) {
             const w = Wallet.createRandom()
@@ -32,10 +32,11 @@ const useIdentity = (name?: string, password?:string) => {
         try {
             const w = await Wallet.fromEncryptedJson(item, password, progress) as Wallet
             setWallet(w)
-            setPublicKey(w.signingKey.publicKey)
-            setPrivateKey(w.privateKey)
+            setPublicKey(w.signingKey.publicKey.slice(2))
+            setPrivateKey(w.privateKey.slice(2))
             setAddress(w.address)
             setError(undefined)
+            console.log(w.signingKey.publicKey.slice(2))
         } catch (e:any) {
             console.error(e)
             setError((e as Error).message)
@@ -45,14 +46,19 @@ const useIdentity = (name?: string, password?:string) => {
 
     const result = useMemo(() => ({
         wallet,
-        publicKey: publicKey,
-        privateKey: privateKey,
+        publicKey,
+        privateKey,
         percent,
         address,
         error,
     }), [
         wallet,
-        percent])
+        percent,
+        privateKey,
+        publicKey,
+        error,
+        address
+    ])
 
     return result
 }

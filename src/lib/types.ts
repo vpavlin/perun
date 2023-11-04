@@ -13,3 +13,16 @@ export type RunItem = {
     startTimestamp: number | undefined
     finishTimestamp: number | undefined
 }
+
+export type PairingRequest = {
+    publicKey: string
+    deviceName: string
+    secret: string
+    confirmed: boolean
+}
+
+export type SyncData = {
+    run: RunItem
+    points: StoreItem[]
+
+}

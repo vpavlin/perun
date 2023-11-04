@@ -2,12 +2,17 @@ import { useState } from "react";
 import useIdentity from "../hooks/useIdentity";
 import { APP_PREFIX, IDENTITY_STORAGE_NAME } from "../constants";
 import { useLocalStorage } from "usehooks-ts";
+import Pairing from "../components/sync/pairing"
+import SyncReceive from "../components/sync/syncreceive"
 
 const Settings = () => {
     const [password, setPassword] = useState<string>()
     const [passInput, setPassInput] = useState<string>()
-    const {address, error, wallet} = useIdentity(IDENTITY_STORAGE_NAME, password)
+    const {address, error, wallet, publicKey, privateKey} = useIdentity(IDENTITY_STORAGE_NAME, password)
     const [gpsRate, setGPSRate] = useLocalStorage(`${APP_PREFIX}-gpsrate`, 1000)
+    const [pair, setPair] = useState<boolean>()
+    const [sync, setSync] = useState<boolean>()
+
 
 
     const unlock = ()  => {
@@ -34,6 +39,14 @@ const Settings = () => {
 
                 </div>
             }
+            <div className="p-2 text-center">
+                <button className="btn btn-lg btn-primary" onClick={() => {setSync(false); setPair(true)}}>Pair</button>
+            </div>
+            {pair && <Pairing wallet={wallet} publicKey={publicKey} privateKey={privateKey} />}
+            <div className="p-2 text-center">
+                <button className="btn btn-lg btn-primary" onClick={() => {setPair(false);setSync(true);}}>Sync</button>
+            </div>
+            {sync && <SyncReceive />}
         </div>
     </>)
 }
