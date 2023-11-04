@@ -20,7 +20,6 @@ const Map = ({id}: IProps) => {
     const [points, setPoints] = useState<StoreItem[]>()
     const [polyline, setPolyline] = useState<LatLngExpression[]>([])
     const windowHeight = useRef(window.innerHeight);    
-    console.log(windowHeight)
 
 
     useEffect(() =>{
@@ -38,8 +37,8 @@ const Map = ({id}: IProps) => {
     }, [storeGeo, id])
 
     return (<>
-        {loc &&
-            <MapContainer className="min-w-full w-full w-fill z-0" style={{width: "100%", height: windowHeight.current}} center={[loc.lat, loc.lon]} zoom={15} >
+        {points &&
+            <MapContainer className="min-w-full w-full w-fill z-0" style={{width: "100%", height: windowHeight.current}} center={[points[0].loc.lat, points[0].loc.lon]} zoom={16} >
                 <TileLayer
                     attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -48,7 +47,7 @@ const Map = ({id}: IProps) => {
                     //points.map((v) => <Marker key={v.hash} position={[v.loc.lat, v.loc.lon]} />)
                     <Polyline positions={polyline} color="red" />
                 :
-                    <Marker position={[loc.lat, loc.lon]} />
+                    loc && <Marker position={[loc.lat, loc.lon]} />
                 }
             </MapContainer>
         }

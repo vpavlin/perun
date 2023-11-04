@@ -13,9 +13,9 @@ const Wallet = () => {
 
     return (<>
             { !address ?
-                 <button className="btn btn-lg btn-primary" onClick={() => open()}>Open Connect Modal</button>
+                 <a  onClick={() => open()}>Open Connect Modal</a>
                 :
-                <button className="btn btn-lg btn-primary" onClick={() => disconnect()}>{address.slice(0,6)}...{address.slice(address.length-4)}</button>
+                <a  onClick={() => disconnect()}>{address.slice(0,6)}...{address.slice(address.length-4)}</a>
                 }
             </>
 )

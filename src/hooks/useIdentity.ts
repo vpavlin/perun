@@ -18,7 +18,6 @@ const useIdentity = (name?: string, password?:string) => {
     const storageKey = `${name}-key`
     const progress = (percent: number) => {
         setPercent(Math.floor(percent * 100) )
-        console.log(percent)
     } 
 
     useMemo(async () => {
@@ -40,7 +39,6 @@ const useIdentity = (name?: string, password?:string) => {
             setPrivateKey(w.privateKey.slice(2))
             setAddress(w.address)
             setError(undefined)
-            console.log(w.signingKey.publicKey.slice(2))
         } catch (e:any) {
             console.error(e)
             setError((e as Error).message)

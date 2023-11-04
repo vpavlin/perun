@@ -13,6 +13,13 @@ import Prove from "./prove";
 import Moment from "react-moment";
 import moment from "moment";
 
+import {GiPathDistance} from "react-icons/gi"
+import {TbTimeDuration15} from "react-icons/tb"
+import {BsSpeedometer, BsCalendar3} from "react-icons/bs"
+import {PiMetronome} from "react-icons/pi"
+import {MdOutlineSyncAlt} from "react-icons/md"
+
+
 interface IProps  {
     id: string
 }
@@ -75,17 +82,16 @@ const Overview = ({id}: IProps) => {
 
                 {run && points &&
                 <div>
-                    <div className="flex justify-between text-left">
-                        <div className="flex-row">
-                            <div>Name: {run.name}</div>
-                            <div>Start <Moment>{run.startTimestamp}</Moment></div>
-                            <div>Finish <Moment>{run.finishTimestamp}</Moment></div>
+                    <div className="flex justify-between text-left flex-row">
+                        <div className="flex-col lg:flex-row w-4/6">
+                            <div  className="flex flex-row justify-between items-center shadow-lg p-2 bg-neutral m-1 min-w-[200px]">Name: {run.name}</div>
+                            <div  className="flex flex-row justify-between items-center shadow-lg p-2 bg-neutral m-1 min-w-[200px]"><BsCalendar3 size="40" className="m-2" /> <Moment>{run.startTimestamp}</Moment></div>
                         </div>
-                        <div className="flex-row">
-                            <div>Duration: {duratio}s</div>
-                            <div>Distance: {(distance! / 1000).toFixed(3)} km</div>
-                            <div>Velocity: {velocity?.toFixed(2)} km/h</div>
-                            <div>Pace: {moment().startOf('day').add(pace_min_km, 'm').format("mm:ss")} min/km</div>
+                        <div className="flex flex-col lg:flex-row justify-center w-full">
+                            <div className="flex flex-row justify-between items-center shadow-lg p-2 bg-neutral m-1"><TbTimeDuration15 size="40" /> {moment().startOf('day').add(duratio, 'm').format("mm:ss")}</div>
+                            <div className="flex flex-row justify-between items-center shadow-lg p-2 bg-neutral m-1"><GiPathDistance size="40"  className="m-2" /> {(distance! / 1000).toFixed(3)} km</div>
+                            <div className="flex flex-row justify-between items-center shadow-lg p-2 bg-neutral m-1"><BsSpeedometer size="40"  className="m-2" /> {velocity?.toFixed(2)} km/h</div>
+                            <div className="flex flex-row justify-between items-center shadow-lg p-2 bg-neutral m-1"><PiMetronome size="40"  className="m-2" /> {moment().startOf('day').add(pace_min_km, 'm').format("mm:ss")} min/km</div>
                         </div>
                     </div>
                     {false && 
@@ -93,16 +99,20 @@ const Overview = ({id}: IProps) => {
                         {points!.map((v) => <div>{v.loc.lat}, {v.loc.lon} ({Geohash.encode(v.loc.lat, v.loc.lon, 7)}</div>)}
                     </div>
                     }
-                    <div>
-                        
-                        {pairedAccounts && <ul  tabIndex={0} className="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
-                                {pairedAccounts.filter((pa) => pa.confirmed).map((pa) => <li><a onClick={() => setPublicKey(pa.publicKey)}>{pa.deviceName}</a></li>)}
-                            </ul>
-                        }
-                        { publicKey &&
-                            <Sync run={run} points={points} publicKey={publicKey} />
-                        }
-                    </div>
+                    {pairedAccounts && <div className="collapse rounded-none my-3 m-auto  lg:w-5/6">
+                            <input type="checkbox" />
+                            <div className="collapse-title flex flex-row items-center p-2 bg-neutral "><MdOutlineSyncAlt size="40"  className="m-2" /> Sync</div>
+                            <div className="collapse-content bg-neutral "> 
+                                <ul  tabIndex={0} className="dropdown-content z-[1] menu ">
+                                    {pairedAccounts.filter((pa) => pa.confirmed).map((pa) => <li><a onClick={() => setPublicKey(pa.publicKey)}>{pa.deviceName}</a></li>)}
+                                </ul>
+                            
+                            </div>
+                            { publicKey &&
+                                <Sync run={run} points={points} publicKey={publicKey} />
+                            }
+                        </div>
+                    }
                     {false && <div>
                         <button className="btn btn-lg btn-primary" onClick={() => download(`perun-${run!.hash}.json`, points)}>Export</button>
                     </div>}
