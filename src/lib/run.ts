@@ -1,5 +1,6 @@
 import haversineDistance from "haversine-distance";
 import { RunItem, StoreItem } from "./types";
+import Geohash from "latlon-geohash";
 
 export const duration = (run: RunItem) => {
     if (!run.finishTimestamp || !run.startTimestamp) return 0
@@ -26,4 +27,23 @@ export const distance_m = (points: StoreItem[]) => {
 
 export const velocity_kph = (duration: number, distance: number) => {
     return (distance / 1000) / (duration / 3600)
+}
+
+export const filter = (point: StoreItem, cache: string[]):[StoreItem|undefined, string[]]=> {
+    let count = 0
+    const geohash = Geohash.encode(point.loc.lat, point.loc.lon, 7)
+    if (cache.length < 5) {
+        cache.push(geohash)
+        return [point, cache]
+    }
+    cache.map((v) => v == geohash && count++)
+
+    console.log(count)
+    if (count > 5)
+        cache.slice(1).push(geohash)
+    else
+        return [undefined, cache]
+
+
+    return [point, cache]
 }
