@@ -22,7 +22,7 @@ const RunList = () => {
 
     return (<>
         <div>
-            {runs?.filter((v) => v.startTimestamp != undefined).map((v) => <Link to={`/run/${v.hash}`}>{v.name} ({new Date(v.startTimestamp!).toLocaleString()})</Link>)}
+            {runs?.filter((v) => v.startTimestamp != undefined).map((v) => <div className="rounded shadow bg-primary p-2 m-2"><Link to={`/run/${v.hash}`}>{v.name} ({new Date(v.startTimestamp!).toLocaleString()})</Link></div>)}
         </div>
     </>)
 }

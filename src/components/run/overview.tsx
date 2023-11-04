@@ -33,7 +33,7 @@ const Overview = ({id}: IProps) => {
     useEffect(() =>{
         if (!storeGeo) return
         (async () => {
-            const points = await storeGeo.getAll()
+            const points = await storeGeo.getAll(id)
             setPoints(points)
             setDistance(distance_m(points))
             

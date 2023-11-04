@@ -13,7 +13,10 @@ export const distance_m = (points: StoreItem[]) => {
         const p1 = {lat: points[i].loc.lat, lon: points[i].loc.lon}
         const p2 = {lat: points[i+1].loc.lat, lon: points[i+1].loc.lon}
         console.log(p1)
-        console.log(p2)
+        console.log(p2  )
+        console.log(points[i].geoHash)
+
+        console.log(haversineDistance(p1, p2))
 
         distance += haversineDistance(p1, p2)
     }

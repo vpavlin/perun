@@ -85,18 +85,39 @@ export class Store<T> {
         })
     }
 
-    getAll = async () => {
+    getAll = async (runId?: string) => {
         return new Promise<T[]>((resolve, reject) => {
             const transaction = this.db!.transaction(["entry"]);
             const objectStore = transaction.objectStore("entry");
-            const request = objectStore.getAll()
-            request.onerror = (evt) => {
-                console.error(evt)
-                reject("Failed to query the DB")
-            }
-            request.onsuccess = () => {
-                const data: T[] = request.result
-                resolve(data)
+            if (runId) {
+                const index = objectStore.index("run")
+                const keyRng = IDBKeyRange.only(runId);
+
+                const cursorRequest = index.openCursor(keyRng);
+                const data:T[] = []
+            
+                cursorRequest.onsuccess = (e) => {
+                    //@ts-ignore
+                    const cursor = e.target?.result;
+                    if (cursor) {
+                        data.push(cursor.value)
+                        cursor.continue()
+                    } else {
+                        console.log(data)
+                        resolve(data)
+                    }
+                }
+            } else {
+                const request = objectStore.getAll(runId)
+            
+                request.onerror = (evt) => {
+                    console.error(evt)
+                    reject("Failed to query the DB")
+                }
+                request.onsuccess = () => {
+                    const data: T[] = request.result
+                    resolve(data)
+                }
             }
         })
 

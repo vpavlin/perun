@@ -11,12 +11,20 @@ export type GeoLocation = {
     timestamp: number
 }
 
-export const useLocation = (rate: number = 100) => {
+const trackOptions = {
+    enableHighAccuracy: true,
+    maximumAge: 6000,
+    timeout: 5000,
+  };
+
+export const useLocation = (rate: number = 1000) => {
     const [location, setLocation ] = useState<GeoLocation>()
 
     const update = () => {
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition((loc: GeolocationPosition) => {
+                console.log(loc)
+
                 setLocation({
                     heading: loc.coords.heading,
                     lat: loc.coords.latitude,
@@ -25,7 +33,7 @@ export const useLocation = (rate: number = 100) => {
                     geoHash: Geohash.encode(loc.coords.latitude, loc.coords.longitude),
                     timestamp: loc.timestamp
                 })
-            })
+            }, () => {}, trackOptions)
         }
     }
 
