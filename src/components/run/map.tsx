@@ -4,7 +4,7 @@ import { useReadLocalStorage } from "usehooks-ts";
 import { APP_PREFIX, GEO_DATA_STORAGE } from "../../constants";
 import { useLocation } from "../../hooks/useLocation";
 import { id } from "ethers";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../../hooks/useStore";
 import { distance_m } from "../../lib/run";
 import { StoreItem } from "../../lib/types";
@@ -19,6 +19,8 @@ const Map = ({id}: IProps) => {
     const storeGeo = useStore<StoreItem>(GEO_DATA_STORAGE)
     const [points, setPoints] = useState<StoreItem[]>()
     const [polyline, setPolyline] = useState<LatLngExpression[]>([])
+    const windowHeight = useRef(window.innerHeight);    
+    console.log(windowHeight)
 
 
     useEffect(() =>{
@@ -37,7 +39,7 @@ const Map = ({id}: IProps) => {
 
     return (<>
         {loc &&
-            <MapContainer className="min-w-full w-full w-fill min-h-[1000px] h-full z-0" style={{width: "100%", height: "100%"}} center={[loc.lat, loc.lon]} zoom={15} >
+            <MapContainer className="min-w-full w-full w-fill z-0" style={{width: "100%", height: windowHeight.current}} center={[loc.lat, loc.lon]} zoom={15} >
                 <TileLayer
                     attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

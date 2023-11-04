@@ -10,7 +10,7 @@ import RunList from './components/runlist/list'
 
 function App() {
   return (
-    <div className='bg-base-300 p-4 h-full w-full'>
+    <div className='bg-base-300 p-1 h-full w-full'>
       <div className="lg:max-w-6xl w-full h-full m-auto bg-base-100 shadow-lg p-4 rounded-xl">
         <Routes>
             <Route path='/' element={<Main />}>
