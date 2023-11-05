@@ -7,11 +7,11 @@ Introducing Perun, the Privacy-Enabled Running App, where your personal data rem
 
 * Deployed at http://perun.vercel.app/
 * Video ...
-* Pitch ...
+* Pitch [here](https://docs.google.com/presentation/d/1_LVesAwXZBD1TXg7vTo4KNkaReKcfJ_AbxxmZSW-8EQ/edit#slide=id.g1ea7ee2b0a5_4_24)
 
 ## Motivation
 
-We, the runners, willingly share privaty information (our precise location at precise times, our physical condition including detailed output from medical devices) with centralized third party companies and we have no control over our data.
+We, the runners, willingly share private information (our precise location at precise times, our physical condition including detailed output from medical devices) with centralized third party companies while having no control over our data.
 
 Apart from that, there are other risks, like revealing "hot spots" of activity in places where there should be none, like [secret military bases](https://www.theguardian.com/world/2018/jan/28/fitness-tracking-app-gives-away-location-of-secret-us-army-bases).
 
@@ -23,32 +23,34 @@ We would also like introduce privacy into group runs where only the runner is re
 
 For that we are proposing and showcasing a privacy enabled (and focused) run tracker.
 
+![Slide - 5](https://github.com/vpavlin/perun/assets/101796507/c19664fa-1c19-4f96-945c-8818bf7fc2c9)
+
 ## Main features
 
 * Track your run with live map updates and detailed run overview after it is finished
 * No data uploads to third party servers
 * All data stored locally on your device(s)
 * Secure pairing and synchronization over [Waku](https://waku.org)
-* Proof-of-Run allowing you to share verified statisticks from your runs
+* Proof-of-Run allowing you to share verified statistics from your runs
 
 ## Future features
 
 * Privacy preserving group runs
 * NFT/POAP minting with Proof-of-Run (for single and group runs)
-* ZK or iEXEC based proof generation
+* ZK or iExec based proof generation
 * Leaderboards
 
 ## Integrated Sponsors
-* WalletConnect - to be able to interact with iEXEC DataProtector
-* iEXEC DataProtector and Confidential Computing - to be able to process data securely and confidentially without revealing them to 3rd parties
-* CoreDao - to mint NFT based on Proof-of-Run
+* WalletConnect - to be able to interact with iExec DataProtector
+* iExec DataProtector and Confidential Computing - to be able to process data securely and confidentially without revealing them to 3rd parties
+* CoreDAO - to mint NFT based on Proof-of-Run
 
 ## Proposed Solutions & Encountered Problems
 
-Since we were not able to leverage any ZK technology to generate Proof-of-Run, we wanted to rely on iEXEC DataProtector and iEXEC task. The workflow would be as follows:
+Since we were not able to leverage any ZK technology to generate Proof-of-Run, we wanted to rely on iExec DataProtector and iExec task. The workflow would be as follows:
 
-### Prerequisity
-* A task [Docker image is created](./iexec/), pushed and deployed on iEXEC platform.
+### Prerequisities
+* A task [Docker image is created](./iexec/), pushed and deployed on iExec platform.
 * A prover key is uploaded to [SMS](https://protocol.docs.iex.ec/for-developers/confidential-computing/access-confidential-assets).
 
 ### Flow
