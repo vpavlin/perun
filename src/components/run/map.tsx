@@ -39,9 +39,9 @@ const Map = ({id}: IProps) => {
                 return 0
             }).map((v) => [v.loc.lat, v.loc.lon]))
 
-            if (points.length > 0) setCenter(points[0].loc)
+            if (points.length > 0) setCenter(points[points.length-1].loc)
         })()
-    }, [storeGeo, id])
+    }, [storeGeo, id, loc])
 
     return (<>
         {center &&
