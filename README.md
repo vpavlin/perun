@@ -6,8 +6,9 @@
 Introducing Perun, the Privacy-Enabled Running App, where your personal data remains as hidden as the secrets of an ancient, mystical forest. Just as the Slavic god Perun protected the enigmatic Dark Forest, our app safeguards your running data with the utmost care. Your runs, routes, and achievements are yours and yours alone, hidden from prying eyes. With Perun, you can explore the world, keep your privacy intact, and run with the confidence that your data is as secure as the secrets of the universe's cosmic dark forest.
 
 * Deployed at http://perun.vercel.app/
-* Video ...
 * Pitch [here](https://docs.google.com/presentation/d/1_LVesAwXZBD1TXg7vTo4KNkaReKcfJ_AbxxmZSW-8EQ/edit#slide=id.g1ea7ee2b0a5_4_24)
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/WF2rh0EYK0o?si=s5CB5mwnTaNVqFIF" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
 
 ## Motivation
 
