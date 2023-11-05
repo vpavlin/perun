@@ -40,7 +40,7 @@ const Settings = () => {
                 </div>
             }
             <div className="p-2 text-center">
-                <button className="btn btn-lg btn-neutraly" onClick={() => {setSync(false); setPair(true)}}>Pair</button>
+                <button className="btn btn-lg btn-neutral" onClick={() => {setSync(false); setPair(true)}}>Pair</button>
             </div>
             {pair && <Pairing wallet={wallet} publicKey={publicKey} privateKey={privateKey} />}
             <div className="p-2 text-center">

@@ -90,10 +90,11 @@ const Panel = ({id}: IProps) => {
     },[started, run])
     
     return (<>
+    <div className="rounded-t-xl absolute bottom-14 w-full p-4 bg-base-100 z-20 min-h-16 items-center justify-center text-center">
     { run && run.finishTimestamp ?
         <Overview id={id} />
         :
-        <div className="rounded-t-sm absolute bottom-0 w-full p-4 bg-base-100 z-10 items-center justify-center text-center">
+        <div className="">
             { started && run && run.startTimestamp && loc?
                 <div className="flex flex-col">
                     <div className=" flex flex-row justify-between">
@@ -113,6 +114,7 @@ const Panel = ({id}: IProps) => {
             }
         </div>
     }
+    </div>
     </>)
 }
 

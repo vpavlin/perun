@@ -78,7 +78,7 @@ const Overview = ({id}: IProps) => {
 
     
     return (<>
-        <div className="rounded-t-xl absolute bottom-0 w-full p-4 bg-base-100 z-20 min-h-16 items-center justify-center text-center">
+        <div>
 
                 {run && points &&
                 <div>

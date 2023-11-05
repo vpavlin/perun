@@ -8,6 +8,9 @@ import { sha256 } from "js-sha256"
 import QRCode from "react-qr-code"
 import { Wallet } from "ethers"
 import { PairingRequest } from "../../lib/types"
+import { MdDevicesOther } from "react-icons/md"
+import { HiOutlineKey } from "react-icons/hi"
+import { FaUserSecret } from "react-icons/fa"
 
 
 interface IProps {
@@ -69,13 +72,13 @@ const Pairing = ({wallet, publicKey, privateKey}: IProps) => {
         <div>
             { wallet &&
             <div>
-                <div>
+                <div className="m-3">
                     <label className="label">
                         <span className="label-text">Device Name</span>
                         <input type="text" className="input input-primary" value={deviceName} onChange={(e) => setDeviceName(e.target.value)} />
                     </label>
                     <div>
-                        <button className="btn btn-lg btn-primary" disabled={!dispatcher} onClick={() => setScanner(true)}>Scan{ !dispatcher  && <span className="loading loading-spinner"></span>}</button>
+                        <button className="btn btn-lg btn-neutral" disabled={!dispatcher} onClick={() => setScanner(true)}>Scan{ !dispatcher  && <span className="loading loading-spinner"></span>}</button>
                         {scanner && dispatcher && <QrScanner
                                 onDecode={(result:string) => {
                                     const pa = JSON.parse(result)
@@ -88,27 +91,27 @@ const Pairing = ({wallet, publicKey, privateKey}: IProps) => {
                                 onError={(error:any) => console.error(error?.message)}
                         />}
                     </div>
-                        {publicKey && deviceName != "" && secret && <QRCode className="m-auto border-white border-4 rounded-lg" value={JSON.stringify({confirmed:false, deviceName: deviceName, publicKey: publicKey, secret: secret} as PairingRequest)} />}
+                        {publicKey && deviceName != "" && secret && <QRCode className="m-auto my-3 border-white border-4 rounded-lg" value={JSON.stringify({confirmed:false, deviceName: deviceName, publicKey: publicKey, secret: secret} as PairingRequest)} />}
                     <div>
 
                     </div>
                 </div>
                 {proposedPairing && 
-                    <div>
+                    <div className="text-center my-5 m-auto w-fit ">
                         New device pairing request
-                        <div>
-                            <span>Device Name</span>
+                        <div className="flex flex-row justify-start items-center space-x-3">
+                            <span><MdDevicesOther size="40" /></span>
                             <span>{proposedPairing.deviceName}</span>
                         </div>
-                        <div>
-                            <span>Device Key</span>
-                            <span>{proposedPairing.publicKey}</span>
+                        <div className="flex flex-row justify-start items-center space-x-3">
+                            <span><HiOutlineKey size="40" /></span>
+                            <span>{proposedPairing.publicKey.slice(0,10)}...{proposedPairing.publicKey.slice(proposedPairing.publicKey.length-10)}</span>
                         </div>
-                        <div className="justify-between">
-                            <span>Pairing Secret</span>
+                        <div className="flex flex-row justify-start items-center space-x-3">
+                            <span><FaUserSecret size="40" /></span>
                             <span>{proposedPairing.secret}</span>
                         </div>
-                        <button  className="btn btn-lg btn-primary" onClick={() => confirm()}>Confirm</button>
+                        <button  className="btn btn-lg btn-neutral" onClick={() => confirm()}>Confirm</button>
                     </div>
                 }
             </div>
