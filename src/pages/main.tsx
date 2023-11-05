@@ -26,6 +26,7 @@ const Main = () => {
                     <li><Link onClick={() => setDrawer(!drawer)} to={"/run/"} >New</Link>  </li>
                     <li><Link onClick={() => setDrawer(!drawer)} to={"/runs/"}>Runs</Link></li>   
                     <li><Link onClick={() => setDrawer(!drawer)} to={"/settings/"} >Settings</Link></li> 
+                    <li><Link onClick={() => setDrawer(!drawer)} to={"/friends/"} >Friends</Link></li>
                     <li><Wallet /></li> 
                 
                 </ul>

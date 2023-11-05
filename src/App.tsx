@@ -6,6 +6,7 @@ import Main from './pages/main';
 import Settings from './pages/settings';
 import Run from './components/run/run';
 import RunList from './components/runlist/list'
+import Friends from './components/friends/friends';
 
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
               <Route path="/runs/" element={<RunList />} />
               <Route path='settings/' element={<Settings />} />
               <Route path='run/:id?' element={<Run />} />
+              <Route path='/friends/' element={<Friends />} />
             </Route>
           </Routes> 
       </div>
