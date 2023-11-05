@@ -1,4 +1,52 @@
-# Getting Started with Create React App
+# Perun - Privacy-Enabled Running App
+
+Introducing Perun, the Privacy-Enabled Running App, where your personal data remains as hidden as the secrets of an ancient, mystical forest. Just as the Slavic god Perun protected the enigmatic Dark Forest, our app safeguards your running data with the utmost care. Your runs, routes, and achievements are yours and yours alone, hidden from prying eyes. With Perun, you can explore the world, keep your privacy intact, and run with the confidence that your data is as secure as the secrets of the universe's cosmic dark forest.
+
+* Deployed at http://perun.vercel.app/
+* Video ...
+* Pitch ...
+
+## Main features
+
+* Track your run with live map updates and detailed run overview after it is finished
+* No data uploads to third party servers
+* All data stored locally on your device(s)
+* Secure pairing and synchronization over [Waku](https://waku.org)
+* Proof-of-Run allowing you to share verified statisticks from your runs
+
+## Future features
+
+* Privacy preserving group runs
+* NFT/POAP minting with Proof-of-Run (for single and group runs)
+* ZK or iEXEC based proof generation
+* Leaderboards
+
+## Proposed Solutions & Encountered Problems
+
+Since we were not able to leverage any ZK technology to generate Proof-of-Run, we wanted to rely on iEXEC DataProtector and iEXEC task. The workflow would be as follows:
+
+### Prerequisity
+* A task [Docker image is created](./iexec/), pushed and deployed on iEXEC platform.
+* A prover key is uploaded to [SMS](https://protocol.docs.iex.ec/for-developers/confidential-computing/access-confidential-assets).
+
+### Flow
+* User uses the app to track a run
+* User requests a proof-of-run
+* Run log (GPS coordinates + metadata) is uploaded to DataProtector to not reveal any data to third parties
+* A task is executed
+  * Task fetches the run log from DataProtector
+  * Processes the data and generates a proof-of-run object
+  * In the post-TEE section of the task, the proof is signed by a prover account (the prover PrivateKey is fetched from SMS)
+* User recieves the signed Proof-of-Run without revealing the data to a third party
+* User can mint an NFT which has the Proof-of-Run attached
+
+### Problems
+* Would were not able to deploy our task due to a need to [sconify](https://protocol.docs.iex.ec/for-developers/confidential-computing/choose-your-tee-framework/create-your-first-sgx-app) the image - which was, based on discussion with iEXEC representatives, not possible during the hackathon
+* We could not use DataProtector SDK due to conflicting verions of `ethers.js` package
+* Even if the above were resolved, we were not able to find a flow how to execute the task from browser (i.e. upon user request to generate the proof)
+* We could not get the NFT minting working due to issues with contract deployment and function execution on CoreDAO
+
+## Run the App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
