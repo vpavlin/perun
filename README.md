@@ -8,7 +8,8 @@ Introducing Perun, the Privacy-Enabled Running App, where your personal data rem
 * Deployed at http://perun.vercel.app/
 * Pitch [here](https://docs.google.com/presentation/d/1_LVesAwXZBD1TXg7vTo4KNkaReKcfJ_AbxxmZSW-8EQ/edit#slide=id.g1ea7ee2b0a5_4_24)
 
-<iframe width="560" height="315" src="https://www.youtube.com/embed/WF2rh0EYK0o?si=s5CB5mwnTaNVqFIF" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+
+[![Watch the video](https://github.com/vpavlin/perun/assets/101796507/950b74d1-acc6-4048-8100-165b6ee2f71b)](https://www.youtube.com/watch?v=WF2rh0EYK0o)
 
 ## Motivation
 
