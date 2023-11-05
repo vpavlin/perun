@@ -10,4 +10,4 @@ A privacy-enabled running app,  where your personal data remains hidden.
 ![Slide - 7](https://github.com/vpavlin/perun/assets/101796507/da11a5ea-1e71-4e21-a75d-fa4f45072a4a)
 ![Slide - 8](https://github.com/vpavlin/perun/assets/101796507/052be189-2aa3-4e52-b3bd-7b794ced56ac)
 ![Slide - 9](https://github.com/vpavlin/perun/assets/101796507/1590a653-8307-4bda-b5f6-10f3a119f653)
-![Slide - 10](https://github.com/vpavlin/perun/assets/101796507/2390a1dd-bf87-44c6-9dff-0eca2a114e7a)
+![Slide - 10 (1)](https://github.com/vpavlin/perun/assets/101796507/36061c9b-1b34-443a-a056-6bf1e3b1eca5)
