@@ -8,10 +8,13 @@ const Run = () => {
 
     return (
         <>
-            <div className="relative min-h-[800px] h-full">
-                <Map  id={id} />
+            <div className="relative h-full overflow-hidden">
+                
                 { id ?
-                    <Panel id={id} />
+                    <div>
+                        <Map id={id} />
+                        <Panel id={id} />
+                    </div>
                     :
                     <NewRun />
                 }

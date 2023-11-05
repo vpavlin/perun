@@ -2,9 +2,10 @@ import { DataObject, IExecDataProtector } from '@iexec/dataprotector';
 import { RunItem, StoreItem } from '../../lib/types';
 import { useEffect, useState } from 'react';
 import useIdentity from '../../hooks/useIdentity';
-import { APP_PREFIX } from '../../constants';
+import { APP_PREFIX, COMPLETELY_UNSERCURE_AND_LEAKING_PROVER_KEY } from '../../constants';
 import { distance_m, duration, pace, velocity_kph } from '../../lib/run';
 import { download } from '../../lib/utils';
+import { Wallet } from 'ethers';
 
 interface IProps {
     run: RunItem
@@ -14,7 +15,9 @@ const Prove = ({run, points}: IProps) => {
 
     const [dataProtector, setDataProtector] = useState<IExecDataProtector>()
     const [processing, setProcessing] = useState(false)
-    const {wallet} = useIdentity(`${APP_PREFIX}-master`, "password")
+    //const {wallet} = useIdentity(`${APP_PREFIX}-master`, "password")
+    const wallet = new Wallet(COMPLETELY_UNSERCURE_AND_LEAKING_PROVER_KEY)
+
 
     useEffect(() => {
         if (window.ethereum && !dataProtector) {

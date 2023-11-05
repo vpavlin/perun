@@ -2,7 +2,7 @@ import { MapContainer, TileLayer, Marker, Polyline } from "react-leaflet";
 import {type LatLngExpression} from "leaflet";
 import { useReadLocalStorage } from "usehooks-ts";
 import { APP_PREFIX, GEO_DATA_STORAGE } from "../../constants";
-import { useLocation } from "../../hooks/useLocation";
+import { useLocation, GeoLocation } from "../../hooks/useLocation";
 import { id } from "ethers";
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../../hooks/useStore";
@@ -19,8 +19,13 @@ const Map = ({id}: IProps) => {
     const storeGeo = useStore<StoreItem>(GEO_DATA_STORAGE)
     const [points, setPoints] = useState<StoreItem[]>()
     const [polyline, setPolyline] = useState<LatLngExpression[]>([])
-    const windowHeight = useRef(window.innerHeight);    
+    const windowHeight = useRef(window.innerHeight); 
+    const [center, setCenter] = useState<GeoLocation>()   
 
+    useEffect(() => {
+        if (center) return
+        setCenter(loc)
+    }, [loc])
 
     useEffect(() =>{
         if (!storeGeo || !id) return
@@ -33,12 +38,14 @@ const Map = ({id}: IProps) => {
                 if (a.loc.timestamp > b.loc.timestamp) return 1
                 return 0
             }).map((v) => [v.loc.lat, v.loc.lon]))
+
+            if (points.length > 0) setCenter(points[0].loc)
         })()
     }, [storeGeo, id])
 
     return (<>
-        {points &&
-            <MapContainer className="min-w-full w-full w-fill z-0" style={{width: "100%", height: windowHeight.current}} center={[points[0].loc.lat, points[0].loc.lon]} zoom={16} >
+        {center &&
+            <MapContainer className="min-w-full w-full w-fill z-0" style={{width: "100%", height: windowHeight.current}} center={[center.lat, center.lon]} zoom={16} >
                 <TileLayer
                     attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

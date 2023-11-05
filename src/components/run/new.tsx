@@ -25,10 +25,10 @@ const NewRun = () => {
     return (<>
         <div className="max-w-md text-center items-center m-auto">
             <label className="label">
-                <span className="label-text">Run Name</span>
-                <input type="text" className="input input-primary" onChange={(e) => setName(e.target.value)} />
+                <span className="label-text">Name your run</span>
+                <input type="text" className="input input-bordered rounded" onChange={(e) => setName(e.target.value)} />
             </label>
-            <button className="btn btn-lg btn-primary" disabled={!name || !storeRuns} onClick={create}>Create</button>
+            <button className="btn btn-lg btn-neutral rounded-none " disabled={!name || !storeRuns} onClick={create}>Create</button>
         </div>
     </>)
 }

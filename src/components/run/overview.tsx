@@ -84,7 +84,7 @@ const Overview = ({id}: IProps) => {
                 <div>
                     <div className="flex justify-between text-left flex-row">
                         <div className="flex-col lg:flex-row w-4/6">
-                            <div  className="flex flex-row justify-between items-center shadow-lg p-2 bg-neutral m-1 min-w-[200px]">Name: {run.name}</div>
+                            <div  className="flex flex-row justify-between items-center shadow-lg p-2 bg-neutral m-1 min-w-[200px] font-bold">{run.name}</div>
                             <div  className="flex flex-row justify-between items-center shadow-lg p-2 bg-neutral m-1 min-w-[200px]"><BsCalendar3 size="40" className="m-2" /> <Moment>{run.startTimestamp}</Moment></div>
                         </div>
                         <div className="flex flex-col lg:flex-row justify-center w-full">
