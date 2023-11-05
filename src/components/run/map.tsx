@@ -56,7 +56,7 @@ const Map = ({id}: IProps) => {
                 />
                 { points && polyline ?
                     //points.map((v) => <Marker key={v.hash} position={[v.loc.lat, v.loc.lon]} />)
-                    <Polyline positions={polyline} color="red" />
+                    <Polyline positions={polyline} color="red" weight={4} />
                 :
                     loc && <Marker position={[loc.lat, loc.lon]} />
                 }
