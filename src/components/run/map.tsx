@@ -15,6 +15,8 @@ interface IProps  {
 
 const Map = ({id}: IProps) => {
     const gpsRate = useReadLocalStorage<number>(`${APP_PREFIX}-gpsrate`)
+    const started = useReadLocalStorage<boolean>(`${APP_PREFIX}-running`)
+
     const loc = useLocation(gpsRate || 1000);
     const storeGeo = useStore<StoreItem>(GEO_DATA_STORAGE)
     const [points, setPoints] = useState<StoreItem[]>()
@@ -29,6 +31,7 @@ const Map = ({id}: IProps) => {
 
     useEffect(() =>{
         if (!storeGeo || !id) return
+        if (points && !started) return
         (async () => {
             const points = await storeGeo.getAll(id)
             setPoints(points)
@@ -39,6 +42,7 @@ const Map = ({id}: IProps) => {
                 return 0
             }).map((v) => [v.loc.lat, v.loc.lon]))
 
+            console.log(points)
             if (points.length > 0) setCenter(points[points.length-1].loc)
         })()
     }, [storeGeo, id, loc])
