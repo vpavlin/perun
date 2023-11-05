@@ -9,6 +9,20 @@ Introducing Perun, the Privacy-Enabled Running App, where your personal data rem
 * Video ...
 * Pitch ...
 
+## Motivation
+
+We, the runners, willingly share privaty information (our precise location at precise times, our physical condition including detailed output from medical devices) with centralized third party companies and we have no control over our data.
+
+Apart from that, there are other risks, like revealing "hot spots" of activity in places where there should be none, like [secret military bases](https://www.theguardian.com/world/2018/jan/28/fitness-tracking-app-gives-away-location-of-secret-us-army-bases).
+
+We belive our data should be considered private by default and only revieled based on our own consideration and decision.
+
+At the same time we understand that people are competitive and for that, they need to be able to verifiably produce  a reasonable level of aggregated outputs about their activities - to share with friends, colleages or simply for themselves as a badge of honor and achievement.
+
+We would also like introduce privacy into group runs where only the runner is responsible for revealing the participation. At the same time we see the importance of being able to show the attendance for the organizers - to gain sponsors or future participants.
+
+For that we are proposing and showcasing a privacy enabled (and focused) run tracker.
+
 ## Main features
 
 * Track your run with live map updates and detailed run overview after it is finished
@@ -24,6 +38,11 @@ Introducing Perun, the Privacy-Enabled Running App, where your personal data rem
 * ZK or iEXEC based proof generation
 * Leaderboards
 
+## Integrated Sponsors
+* WalletConnect - to be able to interact with iEXEC DataProtector
+* iEXEC DataProtector and Confidential Computing - to be able to process data securely and confidentially without revealing them to 3rd parties
+* CoreDao - to mint NFT based on Proof-of-Run
+
 ## Proposed Solutions & Encountered Problems
 
 Since we were not able to leverage any ZK technology to generate Proof-of-Run, we wanted to rely on iEXEC DataProtector and iEXEC task. The workflow would be as follows:
@@ -33,9 +52,11 @@ Since we were not able to leverage any ZK technology to generate Proof-of-Run, w
 * A prover key is uploaded to [SMS](https://protocol.docs.iex.ec/for-developers/confidential-computing/access-confidential-assets).
 
 ### Flow
+
 * User uses the app to track a run
+* User connects a wallet via Web3Modal
 * User requests a proof-of-run
-* Run log (GPS coordinates + metadata) is uploaded to DataProtector to not reveal any data to third parties
+* Run log (GPS coordinates + metadata) is uploaded to DataProtector (using the connected wallet) to not reveal any data to third parties
 * A task is executed
   * Task fetches the run log from DataProtector
   * Processes the data and generates a proof-of-run object
@@ -44,6 +65,7 @@ Since we were not able to leverage any ZK technology to generate Proof-of-Run, w
 * User can mint an NFT which has the Proof-of-Run attached
 
 ### Problems
+* The Web3Modal integration has been done mainly to be able to communicate (and sign transactions) for iEXEC DataProtector, but that sadly did not work out
 * Would were not able to deploy our task due to a need to [sconify](https://protocol.docs.iex.ec/for-developers/confidential-computing/choose-your-tee-framework/create-your-first-sgx-app) the image - which was, based on discussion with iEXEC representatives, not possible during the hackathon
 * We could not use DataProtector SDK due to conflicting verions of `ethers.js` package
 * Even if the above were resolved, we were not able to find a flow how to execute the task from browser (i.e. upon user request to generate the proof)
