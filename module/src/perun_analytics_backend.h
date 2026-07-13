@@ -6,17 +6,18 @@
 #include "rep_perun_analytics_source.h"
 #include "logos_ui_plugin_context.h"
 
+#include "track_codec.h"
+#include "run_analytics.h"
+
 /**
  * @brief UI backend for Perun Analytics (universal authoring model).
  *
- * Subscribes to a per-owner content topic over the `delivery_module` and turns
- * received RUN_META messages into rows in the run list. `publishSampleRun`
- * sends a synthetic run over the same topic (a stand-in for the mobile app),
- * so two instances demonstrate the Delivery round-trip.
- *
- * Derives `PerunAnalyticsSimpleSource` (generated from the .rep — PROP setters
- * auto-sync to QML) and `LogosUiPluginContext` (gives `onContextReady()` and
- * `modules()`, the typed caller/event API for the declared delivery_module).
+ * Subscribes to a per-owner content topic over the `delivery_module`. Each run
+ * arrives as a JSON envelope carrying a base64 compact track blob; the backend
+ * decodes the track (track_codec.h) and computes summary + per-km splits
+ * (run_analytics.h) — the "detailed analytics" the module adds on top of the
+ * raw points. `publishSampleRun` generates a synthetic track and sends it the
+ * same way (a stand-in for the mobile app).
  */
 class PerunAnalyticsBackend : public PerunAnalyticsSimpleSource,
                               public LogosUiPluginContext {
@@ -26,19 +27,20 @@ public:
   QString ingestRun(QString runJson) override;
 
 protected:
-  // Fired once the context is wired; schedules the delivery bootstrap.
   void onContextReady() override;
 
 private:
-  // Wire delivery events, then createNode + start + subscribe(kTopic).
   void bootstrap();
-  // Add a run (by JSON object), de-duped by id, and republish runsJson.
-  void ingestRunObject(const QJsonObject &run);
+
+  // Decode + analyse a received/own run, then add it (de-duped by id).
+  void ingestTrackRun(const QJsonObject &meta, const perun::Track &tr);
+  // Build the rich run JSON (id/name/startTs + summary + splits) for the view.
+  QJsonObject runToJson(const QJsonObject &meta, const perun::Track &tr) const;
+  void addRun(const QJsonObject &run);
   void publishRuns();
 
   QJsonArray m_runs;
   bool m_nodeReady = false;
 
-  // The per-owner LIP-23 content topic (fixed for now; owner identity later).
   static const QString kTopic;
 };

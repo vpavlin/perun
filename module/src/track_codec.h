@@ -105,21 +105,21 @@ inline Track decodeTrack(const uint8_t *b, size_t len) {
   int64_t hr = tr.hasHr ? getSvarint(b, len, i) : 0;
   int64_t spd = tr.hasSpeed ? getSvarint(b, len, i) : 0;
   tr.points.reserve(n);
-  auto emit = [&]() {
+  auto emitPoint = [&]() {  // note: 'emit' is a Qt macro — avoid that name
     GeoPoint p; p.lat = lat / 1e7; p.lon = lon / 1e7; p.t = t;
     if (tr.hasAlt) p.alt = alt / 10.0;
     if (tr.hasHr) p.hr = static_cast<int>(hr);
     if (tr.hasSpeed) p.speed = spd / 100.0;
     tr.points.push_back(p);
   };
-  emit();
+  emitPoint();
   for (uint64_t k = 1; k < n; ++k) {
     t += static_cast<int64_t>(getUvarint(b, len, i));
     lat += getSvarint(b, len, i); lon += getSvarint(b, len, i);
     if (tr.hasAlt) alt += getSvarint(b, len, i);
     if (tr.hasHr) hr += getSvarint(b, len, i);
     if (tr.hasSpeed) spd += getSvarint(b, len, i);
-    emit();
+    emitPoint();
   }
   return tr;
 }
