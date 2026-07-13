@@ -23,8 +23,7 @@ logos_module(
         src/run_store.cpp
     INCLUDE_DIRS
         src
-    FIND_PACKAGES
-        SQLite3
-    LINK_LIBRARIES
-        SQLite::SQLite3
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/sqlite
+    EXTERNAL_LIBS
+        sqlite3
 )

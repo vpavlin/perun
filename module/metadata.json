@@ -14,15 +14,17 @@
 
   "nix": {
     "packages": {
-      "build": ["sqlite"],
-      "runtime": ["sqlite"]
+      "build": [],
+      "runtime": []
     },
-    "external_libraries": [],
+    "external_libraries": [
+      { "name": "sqlite3", "vendor_path": "vendor/sqlite" }
+    ],
     "cmake": {
-      "find_packages": ["SQLite3"],
+      "find_packages": [],
       "extra_sources": [],
       "extra_include_dirs": [],
-      "extra_link_libraries": ["SQLite::SQLite3"]
+      "extra_link_libraries": []
     }
   }
 }
