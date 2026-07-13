@@ -1,0 +1,15 @@
+{
+  "name": "@perun/contract",
+  "version": "0.1.0",
+  "description": "Perun ⇄ Basecamp wire contract: topics, message envelope, and the compact track codec (dependency-free, portable to Kotlin/C++).",
+  "type": "module",
+  "main": "src/track-codec.mjs",
+  "exports": {
+    "./track-codec": "./src/track-codec.mjs",
+    "./messages": "./src/messages.mjs"
+  },
+  "scripts": {
+    "bench": "node bench.mjs"
+  },
+  "license": "MIT"
+}
