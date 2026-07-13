@@ -89,9 +89,16 @@ Companion to `~/perun-rebuild-plan.md`. **Keep this updated as facts are verifie
 - **Interim wire detail**: runs currently sent as a JSON envelope `{v,type:"RUN",run,track:<base64 compact blob>}`. Production format is raw-binary `TRACK_CHUNK` + chunking (wire-contract §5) — deferred until mobile wiring.
 - **Testing**: headless via Xvfb + `nix run .#` (software renderer); autopublish gated by `PERUN_TEST_AUTOPUBLISH`.
 
+- it4: **SQLite persistence** (`run_store`, own DB at `AppDataLocation/perun/runs.db`, no kv_module dep) — verified across restart (instance B loads instance A's run) ✓
+
+### Logos module gotchas (learned)
+- **`emit` is a Qt macro** — never name a lambda/var `emit` in code a Qt TU includes (pure-std headers pass g++ standalone but break once Qt is in the mix).
+- **Hand-written `logos_module()` must pass `FIND_PACKAGES`/`LINK_LIBRARIES`** for extra libs — `metadata.json` `nix.cmake` fields do NOT auto-wire into it. Missing link = headers compile but symbols stay undefined → "Failed to load UI plugin" at `dlopen`. (`metadata.json` `nix.packages` still needed so the lib is a buildInput.)
+- `ui_qml` plugin has **no host persistence path / identity** (`logos_ui_plugin_context.h`): only `modules()` + `onContextReady()`. Use your own data dir.
+- Headless test: `nix run .#` builds+runs; `nix eval .#apps…program --raw` returns a path but does NOT build it. Don't `export HOME` before nix commands (breaks eval cache); set it only for the app process.
+
 ### Module — remaining
-- `kv_module` persistence (runs are in-memory, lost on restart)
-- raw-binary `TRACK_CHUNK` + chunking (match frozen contract)
+- raw-binary `TRACK_CHUNK` + chunking (match frozen contract; currently base64-in-JSON)
 - identity via `accounts_module` + real per-owner topic (currently fixed `/perun/1/demo/proto`)
 - elevation profile chart, map view; `.lgx` packaging for real Basecamp install
 
