@@ -19,6 +19,12 @@ logos_module(
     SOURCES
         src/perun_analytics_backend.h
         src/perun_analytics_backend.cpp
+        src/run_store.h
+        src/run_store.cpp
     INCLUDE_DIRS
         src
+    FIND_PACKAGES
+        SQLite3
+    LINK_LIBRARIES
+        SQLite::SQLite3
 )

@@ -8,6 +8,7 @@
 
 #include "track_codec.h"
 #include "run_analytics.h"
+#include "run_store.h"
 
 /**
  * @brief UI backend for Perun Analytics (universal authoring model).
@@ -31,6 +32,8 @@ protected:
 
 private:
   void bootstrap();
+  // Open the local SQLite store and load any previously-saved runs.
+  void openStoreAndLoad();
 
   // Decode + analyse a received/own run, then add it (de-duped by id).
   void ingestTrackRun(const QJsonObject &meta, const perun::Track &tr);
@@ -41,6 +44,7 @@ private:
 
   QJsonArray m_runs;
   bool m_nodeReady = false;
+  perun::RunStore m_store;
 
   static const QString kTopic;
 };

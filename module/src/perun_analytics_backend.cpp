@@ -5,8 +5,10 @@
 
 #include <QByteArray>
 #include <QDateTime>
+#include <QDir>
 #include <QJsonDocument>
 #include <QLatin1String>
+#include <QStandardPaths>
 #include <QTimer>
 #include <QVariantList>
 
@@ -55,10 +57,38 @@ const QString PerunAnalyticsBackend::kTopic =
     QStringLiteral("/perun/1/demo/proto");
 
 void PerunAnalyticsBackend::onContextReady() {
-  logEvent("onContextReady — scheduling delivery bootstrap");
+  logEvent("onContextReady — loading store, scheduling delivery bootstrap");
+  openStoreAndLoad();
   setTopic(kTopic);
   setStatus(QStringLiteral("Starting node…"));
   QTimer::singleShot(0, [this]() { bootstrap(); });
+}
+
+void PerunAnalyticsBackend::openStoreAndLoad() {
+  // ui_qml plugins have no host-provided persistence path, so use a stable
+  // per-user data dir of our own.
+  QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  if (dir.isEmpty())
+    dir = QDir::homePath() + QStringLiteral("/.local/share");
+  dir += QStringLiteral("/perun");
+  QDir().mkpath(dir);
+  const QString dbPath = dir + QStringLiteral("/runs.db");
+
+  if (!m_store.open(dbPath.toStdString())) {
+    logEvent("run store open failed at " + dbPath.toStdString());
+    return;
+  }
+  for (const std::string &j : m_store.loadAll()) {
+    QJsonParseError err{};
+    const QJsonDocument doc =
+        QJsonDocument::fromJson(QByteArray::fromStdString(j), &err);
+    if (err.error == QJsonParseError::NoError && doc.isObject())
+      m_runs.append(doc.object());
+  }
+  logEvent("loaded " + std::to_string(m_runs.size()) + " persisted runs from " +
+           dbPath.toStdString());
+  if (!m_runs.isEmpty())
+    publishRuns();
 }
 
 void PerunAnalyticsBackend::bootstrap() {
@@ -217,6 +247,12 @@ void PerunAnalyticsBackend::addRun(const QJsonObject &run) {
       return;
   m_runs.prepend(run); // newest first
   publishRuns();
+
+  // Persist to the local SQLite store so runs survive restarts.
+  const QByteArray j = QJsonDocument(run).toJson(QJsonDocument::Compact);
+  m_store.upsert(id.toString().toStdString(),
+                 static_cast<int64_t>(run.value(QStringLiteral("startTs")).toDouble()),
+                 std::string(j.constData(), static_cast<size_t>(j.size())));
   logEvent("added run id=" + id.toString().toStdString());
 }
 
