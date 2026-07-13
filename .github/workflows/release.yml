@@ -1,0 +1,56 @@
+name: Release LGX
+
+# Build the portable perun_analytics .lgx and publish it.
+#   - push a tag `v*`  -> builds + attaches the .lgx to a GitHub Release
+#   - manual dispatch  -> builds + uploads the .lgx as a workflow artifact
+#
+# Portable bundles use canonical variant names (linux-amd64) so the Basecamp
+# package manager accepts them — ALWAYS build .#lgx-portable, NEVER .#lgx.
+#
+# amd64 only for now: the SQLite lib is vendored per-platform
+# (vendor/sqlite/x86_64-linux). To add arm64 (ubuntu-24.04-arm), also vendor
+# vendor/sqlite/aarch64-linux/libsqlite3.so.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build perun_analytics portable .lgx
+        run: nix build ./module#lgx-portable -o lgx-out --print-out-paths
+
+      - name: Collect artifact (arch-suffixed)
+        run: |
+          mkdir -p dist
+          for f in lgx-out/*.lgx; do
+            cp -L "$f" "dist/$(basename "$f" .lgx)-linux-amd64.lgx"
+          done
+          ls -la dist
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lgx-amd64
+          path: dist/*.lgx
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.lgx
+          fail_on_unmatched_files: true

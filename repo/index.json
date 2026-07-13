@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "repositoryName": "perun",
+  "generatedAt": "2026-07-13T15:00:00Z",
+  "packages": [
+    {
+      "name": "perun_analytics",
+      "versions": [
+        {
+          "releasedAt": "2026-07-13T15:00:00Z",
+          "publisherRef": "perun_analytics-v0.1.0",
+          "url": "https://github.com/vpavlin/perun/releases/download/v0.1.0/logos-perun_analytics-module-linux-amd64.lgx",
+          "size": 4760682,
+          "sha256": "6669bfec2b10feab7a2129a76d3b2f93327a1f34e36c22fcd82cba33749080ff",
+          "rootHash": "d0cf1b75ef658000c4743cf4b0b8cb6f89f64436c1166c2d796aceb1ab65e7fd",
+          "manifest": {
+            "author": "",
+            "category": "fitness",
+            "dependencies": [
+              "delivery_module"
+            ],
+            "description": "Detailed running analytics for Perun — ingests runs synced over Logos Delivery and shows splits, elevation, pace and trends.",
+            "display_name": "Perun Analytics",
+            "hashes": {
+              "root": "d0cf1b75ef658000c4743cf4b0b8cb6f89f64436c1166c2d796aceb1ab65e7fd",
+              "variants": "d93a4d70e564e685e1adf817fba96e062aeb4848ee0ec9df8aec39d1ade193d5",
+              "variants/linux-amd64": "c4d8653edfc9dd4957cd212a73af77d4296aa28617f98d1eb6aaceffd6894b30"
+            },
+            "icon": "",
+            "main": {
+              "linux-amd64": "perun_analytics_plugin.so"
+            },
+            "manifestVersion": "0.3.0",
+            "name": "perun_analytics",
+            "type": "ui_qml",
+            "version": "0.1.0",
+            "view": "qml/Main.qml"
+          }
+        }
+      ]
+    }
+  ]
+}

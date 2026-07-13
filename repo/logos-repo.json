@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "name": "perun",
+  "displayName": "Perun",
+  "description": "Perun running analytics — a Logos Basecamp module that ingests runs over Logos Delivery and shows splits, elevation, pace and trends.",
+  "homepage": "https://github.com/vpavlin/perun",
+  "indexUrl": "https://raw.githubusercontent.com/vpavlin/perun/master/repo/index.json",
+  "trustedSigners": []
+}
