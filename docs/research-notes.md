@@ -78,6 +78,23 @@ Companion to `~/perun-rebuild-plan.md`. **Keep this updated as facts are verifie
 ## Open decisions (see plan §11)
 1. Mobile stack: Expo/RN vs Rust-core-UniFFI(reuse LMAO) vs Qt-on-Android. 2. Identity/keys. 3. Wire format (CBOR/protobuf; GPX/CBOR track). 4. Storage node the phone POSTs to. 5. Module backend split. 6. Live-follow scope. 7. Proof-of-Run keep/drop/redesign. 8. Repo/naming/monorepo.
 
+## Build progress (module)
+
+- **Env**: crib converted to **multi-user nix daemon** — vpavlin + jimmy both build, sharing the warm store. All Logos builds now run as vpavlin in `~/perun`.
+- **Repo**: `vpavlin/perun` (public); legacy web app → `vpavlin/perun-legacy`.
+- **module/perun_analytics** (Basecamp `ui_qml`, universal, design-system styled):
+  - it1: scaffolded from tutorial `#ui-qml-backend`, builds green, renders headless ✓
+  - it2: `delivery_module` wired → connects to **logos.dev**, publishes/receives `RUN`; **two-instance receipt proven** (same msg_hash A→B, B rendered the run) ✓
+  - it3: **C++ track codec** (byte-identical to JS contract codec) + `run_analytics` (distance/pace/elev/HR/splits) → detail UI with per-km splits; verified headless (3.83 km / 19:59 / 5:13 / 4 splits) ✓
+- **Interim wire detail**: runs currently sent as a JSON envelope `{v,type:"RUN",run,track:<base64 compact blob>}`. Production format is raw-binary `TRACK_CHUNK` + chunking (wire-contract §5) — deferred until mobile wiring.
+- **Testing**: headless via Xvfb + `nix run .#` (software renderer); autopublish gated by `PERUN_TEST_AUTOPUBLISH`.
+
+### Module — remaining
+- `kv_module` persistence (runs are in-memory, lost on restart)
+- raw-binary `TRACK_CHUNK` + chunking (match frozen contract)
+- identity via `accounts_module` + real per-owner topic (currently fixed `/perun/1/demo/proto`)
+- elevation profile chart, map view; `.lgx` packaging for real Basecamp install
+
 ## Changelog
 - 2026-07-13: Initial notes. Perun + example-apps verified live. Re-research launched for Basecamp framework and Delivery/Storage.
 - 2026-07-13 (discussion): Decisions locked — RN mobile; phone drops Storage entirely; Delivery push is canonical transport (compact CBOR/protobuf + delta-encode → ~55KB/hr, under 150KB, chunk long runs); HTTP-to-local+Delivery-discovery = optional phase-2 fast path; Storage = Basecamp-side backup only (best-effort); E2E per-run encryption over relay; mix deferred (not prod-ready, preset-level, low value for personal sync, revisit for social sharing); north star = maximize value in Basecamp module (analytics/backup/beacon/accounts/sharing), phone stays thin. See plan §0b.
