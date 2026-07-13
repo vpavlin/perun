@@ -96,6 +96,8 @@ Companion to `~/perun-rebuild-plan.md`. **Keep this updated as facts are verifie
 - **Hand-written `logos_module()` must pass `FIND_PACKAGES`/`LINK_LIBRARIES`** for extra libs — `metadata.json` `nix.cmake` fields do NOT auto-wire into it. Missing link = headers compile but symbols stay undefined → "Failed to load UI plugin" at `dlopen`. (`metadata.json` `nix.packages` still needed so the lib is a buildInput.)
 - `ui_qml` plugin has **no host persistence path / identity** (`logos_ui_plugin_context.h`): only `modules()` + `onContextReady()`. Use your own data dir.
 - Headless test: `nix run .#` builds+runs; `nix eval .#apps…program --raw` returns a path but does NOT build it. Don't `export HOME` before nix commands (breaks eval cache); set it only for the app process.
+- **Headless UI tests MUST use RHI/llvmpipe, NOT the 2D software renderer.** `QT_QUICK_BACKEND=software` silently fails to paint some views (e.g. the run-detail view) — blank window, no error. Use `LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe` (software OpenGL) instead. This cost *hours* of false "the code is broken" debugging — the code was fine; a real Basecamp (GPU) always would have rendered it. Also: run the realized app **binary directly** for screenshots (`nix run` may not propagate the GL env; and its eval is slow after a GC).
+- **Don't `nix store gc` mid-iteration.** It evicts the delivery_module build closure (rust + zerokit), forcing a 30–60 min cold rebuild on the next `nix run`. GC only when space is actually tight.
 
 ### Module — remaining
 - raw-binary `TRACK_CHUNK` + chunking (match frozen contract; currently base64-in-JSON)

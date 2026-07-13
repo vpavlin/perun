@@ -1,56 +1,41 @@
-# Perun ⇄ Basecamp wire contract (v1)
+# Perun ⇄ Basecamp wire contract (v2 — gzipped GPX)
 
-The single source of truth both halves depend on. Frozen before mobile/module work. Transport is **Logos Delivery** (Waku). Reference implementation + benchmark: `packages/contract/`.
+The single source of truth both halves depend on. Transport is **Logos Delivery** (Waku). Reference/measurements: `packages/contract/` (`compare.mjs`).
+
+## Format decision (why GPX)
+Runs travel and persist as **standard gzipped GPX 1.1** (with the Garmin `TrackPointExtension` for HR). We measured GPX vs a bespoke compact codec: **raw GPX is ~20× too big, but gzipped GPX is only ~1.5× the compact codec** — still **one Delivery message for every normal run** (see table). In exchange we get **one standard format everywhere**: interoperable with Garmin watches / Strava (import + export come for free), and **no custom codec to port to each platform** (Kotlin/Swift on mobile). The old compact codec (`track-codec.mjs`, `track_codec.h`) is **retired**.
 
 ## Topics (LIP-23)
-- `/perun/1/<runId>/proto` — per-run channel: `RUN_META`, `TRACK_CHUNK`(s), optional `LIVE_POINT`, `DELETE`.
-- `/perun/1/pairing/proto` — device/peer pairing handshake (ports Perun's `request_pairing`→`confirm_sync`).
+- `/perun/1/<ownerId>/proto` — the owner's run feed: `CHUNK` messages carrying gzipped-GPX runs. *(Currently a fixed `/perun/1/demo/proto` until identity/`accounts_module` lands.)*
+- `/perun/1/pairing/proto` — device/peer pairing handshake (ports Perun's `request_pairing`→`confirm_sync`). *(Not yet implemented.)*
 
-`runId` = 16-byte id (hex), e.g. first 16 bytes of `sha256(ownerPub || startTs)`.
-
-## Message envelope
-Bytes passed to `delivery_module.send(topic, payload)`. The module **base64-encodes** the payload across its FFI, so the effective Waku budget is **~150 KB × ¾ of raw bytes**. Keep raw chunks ≤ **~112 KB** (`RAW_CHUNK_BUDGET`).
+## Message envelope (implemented)
+Each message is a small JSON object passed to `delivery_module.send(topic, payload)` (the module base64-wraps the payload across its FFI, so the effective Waku budget is ~150 KB × ¾ of raw bytes):
 
 ```
-{ v:1, type, runId, sender, ts, seq?, total?, sig, blob }
+{ v:1, type:"CHUNK", id:<runId>, seq:<int>, total:<int>, gz:<base64> }
 ```
-- `type` ∈ `{RUN_META=1, TRACK_CHUNK=2, LIVE_POINT=3, DELETE=4}`
-- `sender` — owner public key; `sig` — detached signature over the (encrypted) blob + header
-- `seq`/`total` — chunk index/count for `TRACK_CHUNK` (omit when a run is a single message)
-- `blob` — the payload, **AES-256-GCM encrypted** with the per-run key
+- A run is serialized to GPX → **gzipped** → split into `total` byte-chunks each ≤ ~100 KB raw (base64 stays under 150 KB) → one message per chunk.
+- `gz` — base64 of this chunk of the gzipped-GPX bytes.
+- The receiver buffers chunks by `id`; once all `total` are present it concatenates → **gunzips → parses GPX** → computes analytics → persists (keeping the gzipped GPX as the source of truth for the map + export).
+- The run's **name** lives in the GPX `<trk><name>`; timestamps/HR/elevation are standard GPX fields.
 
-## Encryption
-- Per-run symmetric key: `runKey = HKDF-SHA256(sharedSecret, "perun/track/v1")`. `sharedSecret` established at pairing (QR/deep-link, as in Perun today).
-- `blob = AES-256-GCM(runKey, nonce, plaintext)`; ~28 B overhead (nonce+tag). Content is private over plain relay — routing privacy (mix) is orthogonal and deferred.
-
-## Track blob format (compact binary)
-Header + delta-encoded points. Coordinates fixed-point 1e-7° (~1.1 cm), altitude decimetres, timestamps ms. Deltas zig-zag varint. Full spec in `src/track-codec.mjs`.
+## Sizes (measured — `node packages/contract/compare.mjs`, 2026-07-13)
 ```
-'P'(0x50) | version(1) | flags(1) | uvarint count | uvarint baseT
-base:  svarint latE7 | svarint lonE7 | [svarint altDm] | [svarint hr] | [svarint speedCsm]
-point: uvarint dT | svarint dLatE7 | svarint dLonE7 | [svarint dAltDm] | [svarint dHr] | [svarint dSpeedCsm]
-flags: bit0 alt · bit1 hr · bit2 speed
+case              pts | compact  msgs | gpx.gz  msgs | gz vs compact
+30 min            1800 |   15K    1    |   24K    1   | 1.5x
+1 h               3600 |   31K    1    |   48K    1   | 1.5x
+2 h               7200 |   62K    1    |   93K    1   | 1.5x
+marathon ~3.5h   12600 |  108K    1    |  161K    2   | 1.5x
+100k ultra       36000 |  310K    3    |  458K    5   | 1.5x
 ```
-- `RUN_META` payload: `{ id, name, startTs, finishTs, summary:{distance_m,duration_s,avgPace,avgSpeed,elevGain?,avgHr?} }` (small JSON/CBOR).
-- `TRACK_CHUNK` payload: a track blob for a contiguous slice of points (`chunkTrack()` splits by `RAW_CHUNK_BUDGET`).
+→ Normal runs = one message; only ultra-distance chunks. Round-trip is faithful (verified in the module: 3.83 km / 19:59 / 5:13 / 120 m / 135 bpm renders identically via GPX).
 
-## Chunking rule
-Encode the whole track; if `base64Len(raw) + envelope > 150 KB`, split with `chunkTrack(points, opts, RAW_CHUNK_BUDGET)` and send N `TRACK_CHUNK`s with `seq`/`total`. The receiver reassembles by `runId` + `seq`.
+## Interop
+- **Export**: the module's `exportGpx(runId)` writes a standard `.gpx` (gunzip of the stored blob) — uploadable to Strava/Garmin.
+- **Import** (mobile, later): any GPX (Garmin watch / Strava export) → gzip → send. No conversion needed — the wire format *is* GPX.
 
-## Validation (benchmark evidence, 2026-07-13)
-`node packages/contract/bench.mjs` — ~8.8 bytes/point, **lossless** (≤1.1 cm, exact ms, ≤5 cm alt):
-
-| case | pts | raw | base64 | msgs |
-|---|---|---|---|---|
-| 30 min @1Hz | 1 800 | 15.4 KB | 20.5 KB | 1 |
-| 1 h @1Hz | 3 600 | 31.1 KB | 41.5 KB | 1 |
-| 2 h @1Hz | 7 200 | 61.9 KB | 82.5 KB | 1 |
-| marathon ~3.5 h @1Hz | 12 600 | 108.3 KB | 144.5 KB | 1 |
-| 100k ultra ~10 h @1Hz | 36 000 | 309.7 KB | 413.0 KB | 3 |
-
-→ **Every normal run is a single Delivery message.** Only ultra-distance runs chunk. Storage is not required on the sync path (it stays an optional Basecamp-side backup).
-
-## Open (non-blocking) items
-- Wire format for `RUN_META` small payloads: CBOR vs JSON (leaning CBOR).
-- Exact signature/HKDF scheme once identity is settled (`accounts_module` key vs ported ethers key).
-- `LIVE_POINT` cadence for real-time follow (phase 4).
+## Open (not yet implemented)
+- **Encryption**: per-run key `HKDF-SHA256(sharedSecret, "perun/track/v1")`, AES-256-GCM on the gzipped-GPX bytes; detached signature by the sender key. (Content is currently plaintext-over-relay for the demo.)
+- **Identity + per-owner topic**: `accounts_module` pubkey → `ownerId` in the topic (currently fixed `demo`).
+- **Pairing** handshake; **LIVE_POINT** stream for real-time follow.

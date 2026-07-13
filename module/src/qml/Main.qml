@@ -2,6 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
+import QtQuick.Shapes
+
 import Logos.Theme
 import Logos.Controls
 
@@ -15,6 +17,9 @@ Item {
     property int selectedIndex: 0
     readonly property var selectedRun: (runs.length > 0 && selectedIndex >= 0 && selectedIndex < runs.length) ? runs[selectedIndex] : null
 
+    // Decoded points for the selected run's route map (fetched on demand).
+    property var trackPoints: []
+
     Connections {
         target: logos
         function onViewModuleReadyChanged(moduleName, isReady) {
@@ -22,7 +27,19 @@ Item {
                 root.ready = isReady && root.backend !== null;
         }
     }
-    Component.onCompleted: root.ready = root.backend !== null && logos.isViewModuleReady("perun_analytics");
+    Component.onCompleted: {
+        root.ready = root.backend !== null && logos.isViewModuleReady("perun_analytics");
+        fetchTrack();
+    }
+
+    onSelectedRunChanged: fetchTrack()
+
+    function fetchTrack() {
+        if (!backend || !selectedRun) { root.trackPoints = []; return; }
+        logos.watch(backend.trackJson(selectedRun.id),
+                    function (json) { root.trackPoints = JSON.parse(json || "[]"); mapCanvas.requestPaint(); },
+                    function (e) { root.trackPoints = []; mapCanvas.requestPaint(); });
+    }
 
     // ---- formatting helpers ----
     function fmtDist(m) { return ((m || 0) / 1000).toFixed(2) + " km"; }
@@ -66,7 +83,7 @@ Item {
         // ---- Run list (master) ----
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 170
+            Layout.preferredHeight: 150
             color: Theme.palette.backgroundInset
             radius: Theme.spacing.radiusMedium
             border.color: Theme.palette.borderHairline
@@ -87,9 +104,7 @@ Item {
                     color: index === root.selectedIndex ? Theme.palette.overlayOrange : Theme.palette.backgroundSecondary
                     border.width: index === root.selectedIndex ? 1 : 0
                     border.color: Theme.palette.primary
-
                     MouseArea { anchors.fill: parent; onClicked: root.selectedIndex = index }
-
                     RowLayout {
                         anchors.fill: parent
                         anchors.margins: Theme.spacing.medium
@@ -110,18 +125,16 @@ Item {
                         }
                     }
                 }
-
                 LogosText {
                     anchors.centerIn: parent
                     visible: root.runs.length === 0
                     text: "No runs yet"
-                    color: Theme.palette.textTertiary
-                    font.pixelSize: 14
+                    color: Theme.palette.textTertiary; font.pixelSize: 14
                 }
             }
         }
 
-        // ---- Detail: summary tiles + splits (detail) ----
+        // ---- Detail: summary tiles + route map + splits ----
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -159,6 +172,84 @@ Item {
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.palette.borderHairline }
 
+                // Route map — vector polyline via QtQuick.Shapes (no tiles/network).
+                Rectangle {
+                    id: mapBox
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 210
+                    radius: Theme.spacing.radiusSmall
+                    color: Theme.palette.backgroundElevated
+                    border.color: Theme.palette.borderHairline
+                    border.width: 1
+                    clip: true
+
+                    property var routePts: []
+                    property point startPt: Qt.point(0, 0)
+                    property point endPt: Qt.point(0, 0)
+
+                    function project() {
+                        var pts = root.trackPoints;
+                        if (!pts || pts.length < 2 || width <= 0 || height <= 0) { routePts = []; return; }
+                        var latMin = 1e9, latMax = -1e9, lonMin = 1e9, lonMax = -1e9;
+                        for (var i = 0; i < pts.length; i++) {
+                            var p = pts[i];
+                            if (p.lat < latMin) latMin = p.lat;
+                            if (p.lat > latMax) latMax = p.lat;
+                            if (p.lon < lonMin) lonMin = p.lon;
+                            if (p.lon > lonMax) lonMax = p.lon;
+                        }
+                        var m = 12;
+                        var cosLat = Math.cos(((latMin + latMax) / 2) * Math.PI / 180);
+                        var spanX = Math.max(1e-9, (lonMax - lonMin) * cosLat);
+                        var spanY = Math.max(1e-9, (latMax - latMin));
+                        var scale = Math.min((width - 2 * m) / spanX, (height - 2 * m) / spanY);
+                        var drawW = spanX * scale, drawH = spanY * scale;
+                        var ox = (width - drawW) / 2, oy = (height - drawH) / 2;
+                        var out = [];
+                        for (i = 0; i < pts.length; i++) {
+                            out.push(Qt.point(ox + (pts[i].lon - lonMin) * cosLat * scale,
+                                              oy + drawH - (pts[i].lat - latMin) * scale));
+                        }
+                        routePts = out;
+                        startPt = out[0];
+                        endPt = out[out.length - 1];
+                    }
+                    onWidthChanged: project()
+                    onHeightChanged: project()
+                    Connections { target: root; function onTrackPointsChanged() { mapBox.project(); } }
+
+                    Shape {
+                        anchors.fill: parent
+                        ShapePath {
+                            strokeColor: Theme.palette.primary
+                            strokeWidth: 2.5
+                            fillColor: "transparent"
+                            capStyle: ShapePath.RoundCap
+                            joinStyle: ShapePath.RoundJoin
+                            PathPolyline { path: mapBox.routePts }
+                        }
+                    }
+                    Rectangle {
+                        visible: mapBox.routePts.length > 1
+                        width: 9; height: 9; radius: 5
+                        color: Theme.palette.success
+                        x: mapBox.startPt.x - 4; y: mapBox.startPt.y - 4
+                    }
+                    Rectangle {
+                        visible: mapBox.routePts.length > 1
+                        width: 9; height: 9; radius: 5
+                        color: Theme.palette.error
+                        x: mapBox.endPt.x - 4; y: mapBox.endPt.y - 4
+                    }
+                    LogosText {
+                        anchors.centerIn: parent
+                        visible: mapBox.routePts.length < 2
+                        text: "no track"
+                        color: Theme.palette.textTertiary
+                        font.pixelSize: 12
+                    }
+                }
+
                 // Splits header
                 RowLayout {
                     Layout.fillWidth: true
@@ -169,7 +260,6 @@ Item {
                     Item { Layout.fillWidth: true }
                 }
 
-                // Splits list with a pace bar
                 ListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -182,7 +272,6 @@ Item {
                         LogosText { text: root.fmtPace(modelData.paceSecPerKm); color: Theme.palette.text; font.pixelSize: 13; Layout.preferredWidth: 90 }
                         LogosText { text: "+" + root.fmtElev(modelData.elevGainM); color: Theme.palette.textSecondary; font.pixelSize: 13; Layout.preferredWidth: 70 }
                         LogosText { text: modelData.avgHr > 0 ? Math.round(modelData.avgHr) : "—"; color: Theme.palette.textSecondary; font.pixelSize: 13; Layout.preferredWidth: 50 }
-                        // relative pace bar (faster = longer, primary color)
                         Rectangle {
                             Layout.fillWidth: true
                             height: 10
@@ -207,10 +296,22 @@ Item {
             }
         }
 
-        LogosButton {
-            text: "Publish sample run"
-            enabled: root.ready
-            onClicked: logos.watch(backend.publishSampleRun(), function () {}, function (e) { console.log("publish error:", e); });
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing.medium
+            LogosButton {
+                text: "Publish sample run"
+                enabled: root.ready
+                onClicked: logos.watch(backend.publishSampleRun(), function () {}, function (e) { console.log("publish error:", e); });
+            }
+            LogosButton {
+                text: "Export GPX"
+                enabled: root.selectedRun !== null
+                onClicked: logos.watch(backend.exportGpx(root.selectedRun.id),
+                                       function (path) { console.log("exported:", path); },
+                                       function (e) { console.log("export error:", e); });
+            }
+            Item { Layout.fillWidth: true }
         }
     }
 }
