@@ -21,9 +21,17 @@ logos_module(
         src/perun_analytics_backend.cpp
         src/run_store.h
         src/run_store.cpp
+        src/geo.h
+        src/gpx.h
+        src/gzip.h
+        src/run_analytics.h
     INCLUDE_DIRS
         src
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/sqlite
     EXTERNAL_LIBS
         sqlite3
+    FIND_PACKAGES
+        ZLIB
+    LINK_LIBRARIES
+        ZLIB::ZLIB
 )

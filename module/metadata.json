@@ -14,7 +14,7 @@
 
   "nix": {
     "packages": {
-      "build": [],
+      "build": ["zlib"],
       "runtime": []
     },
     "external_libraries": [

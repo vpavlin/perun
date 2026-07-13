@@ -6,6 +6,7 @@
 #include <QByteArray>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QJsonDocument>
 #include <QLatin1String>
 #include <QStandardPaths>
@@ -15,17 +16,23 @@
 #include "logos_sdk.h"
 #include "logos_types.h"
 
+#include "gpx.h"
+#include "gzip.h"
+
 namespace {
 void logEvent(const std::string &what) {
   std::cerr << "[perun_analytics backend] " << what << std::endl;
 }
 qint64 nowMs() { return QDateTime::currentMSecsSinceEpoch(); }
 
+// Raw bytes per chunk; base64 (~1.33x) + envelope stays under Waku's 150 KB.
+constexpr int kChunkBudget = 100000;
+
 // A plausible synthetic run near Brno (~3 m/s, GPS/elevation jitter, drifting
 // HR) — stand-in for the mobile app's capture until it exists.
 perun::Track makeSyntheticTrack(int seconds, int hz) {
   perun::Track tr;
-  tr.hasAlt = tr.hasHr = tr.hasSpeed = true;
+  tr.hasAlt = tr.hasHr = true;
   double lat = 49.1951, lon = 16.6068, alt = 250, hr = 120, heading = 0;
   qint64 t = nowMs();
   const double mLat = 111320.0, mLon = 111320.0 * std::cos(lat * M_PI / 180.0);
@@ -38,13 +45,12 @@ perun::Track makeSyntheticTrack(int seconds, int hz) {
   for (int i = 0; i < n; ++i) {
     heading += (rnd() - 0.5) * 0.3;
     const double speed = 2.8 + rnd() * 0.8;
-    const double dist = speed / hz;
-    lat += dist * std::cos(heading) / mLat;
-    lon += dist * std::sin(heading) / mLon;
+    lat += (speed / hz) * std::cos(heading) / mLat;
+    lon += (speed / hz) * std::sin(heading) / mLon;
     alt += (rnd() - 0.5) * 0.8;
     hr = std::min(185.0, hr + (rnd() - 0.45) * 0.5);
     perun::GeoPoint p;
-    p.lat = lat; p.lon = lon; p.alt = alt; p.speed = speed;
+    p.lat = lat; p.lon = lon; p.alt = alt;
     p.hr = static_cast<int>(std::llround(hr)); p.t = t;
     tr.points.push_back(p);
     t += static_cast<qint64>(1000 / hz);
@@ -65,17 +71,14 @@ void PerunAnalyticsBackend::onContextReady() {
 }
 
 void PerunAnalyticsBackend::openStoreAndLoad() {
-  // ui_qml plugins have no host-provided persistence path, so use a stable
-  // per-user data dir of our own.
   QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
   if (dir.isEmpty())
     dir = QDir::homePath() + QStringLiteral("/.local/share");
-  dir += QStringLiteral("/perun");
-  QDir().mkpath(dir);
-  const QString dbPath = dir + QStringLiteral("/runs.db");
+  m_dataDir = dir + QStringLiteral("/perun");
+  QDir().mkpath(m_dataDir);
 
-  if (!m_store.open(dbPath.toStdString())) {
-    logEvent("run store open failed at " + dbPath.toStdString());
+  if (!m_store.open((m_dataDir + QStringLiteral("/runs.db")).toStdString())) {
+    logEvent("run store open failed");
     return;
   }
   for (const std::string &j : m_store.loadAll()) {
@@ -85,8 +88,7 @@ void PerunAnalyticsBackend::openStoreAndLoad() {
     if (err.error == QJsonParseError::NoError && doc.isObject())
       m_runs.append(doc.object());
   }
-  logEvent("loaded " + std::to_string(m_runs.size()) + " persisted runs from " +
-           dbPath.toStdString());
+  logEvent("loaded " + std::to_string(m_runs.size()) + " persisted runs");
   if (!m_runs.isEmpty())
     publishRuns();
 }
@@ -102,26 +104,35 @@ void PerunAnalyticsBackend::bootstrap() {
       "messageReceived", [this](const QVariantList &data) {
         if (data.size() < 3)
           return;
-        const QByteArray payload = data.at(2).toByteArray();
         QJsonParseError err{};
-        const QJsonDocument doc = QJsonDocument::fromJson(payload, &err);
+        const QJsonDocument doc =
+            QJsonDocument::fromJson(data.at(2).toByteArray(), &err);
         if (err.error != QJsonParseError::NoError || !doc.isObject())
           return;
         const QJsonObject env = doc.object();
-        if (env.value(QStringLiteral("type")).toString() != QLatin1String("RUN"))
+        if (env.value(QStringLiteral("type")).toString() !=
+            QLatin1String("CHUNK"))
           return;
-        const QByteArray blob = QByteArray::fromBase64(
-            env.value(QStringLiteral("track")).toString().toUtf8());
-        try {
-          const perun::Track tr = perun::decodeTrack(
-              reinterpret_cast<const uint8_t *>(blob.constData()),
-              static_cast<size_t>(blob.size()));
-          logEvent("received RUN with " + std::to_string(tr.points.size()) +
-                   " points");
-          ingestTrackRun(env.value(QStringLiteral("run")).toObject(), tr);
-        } catch (const std::exception &e) {
-          logEvent(std::string("track decode failed: ") + e.what());
-        }
+
+        const QString id = env.value(QStringLiteral("id")).toString();
+        const int seq = env.value(QStringLiteral("seq")).toInt();
+        const int total = env.value(QStringLiteral("total")).toInt();
+        const QByteArray part = QByteArray::fromBase64(
+            env.value(QStringLiteral("gz")).toString().toLatin1());
+
+        ChunkBuf &buf = m_chunks[id];
+        buf.total = total;
+        buf.parts.insert(seq, part);
+        if (buf.parts.size() < total)
+          return;
+
+        QByteArray gz;
+        for (int i = 0; i < total; ++i)
+          gz += buf.parts.value(i);
+        m_chunks.remove(id);
+        logEvent("reassembled " + std::to_string(total) + " chunk(s) for " +
+                 id.toStdString());
+        ingestGzTrack(id, gz);
       });
 
   const QJsonObject cfg{
@@ -161,102 +172,142 @@ QString PerunAnalyticsBackend::publishSampleRun() {
     return QStringLiteral("Node not ready");
 
   const int n = m_runs.size() + 1;
-  const perun::Track tr = makeSyntheticTrack(/*seconds=*/1200, /*hz=*/1);
+  perun::Track tr = makeSyntheticTrack(/*seconds=*/1200, /*hz=*/1);
+  tr.name = QStringLiteral("Morning run %1").arg(n).toStdString();
 
-  const QJsonObject meta{
-      {"id", QStringLiteral("run-%1-%2").arg(nowMs()).arg(n)},
-      {"name", QStringLiteral("Morning run %1").arg(n)},
-      {"startTs", tr.points.empty() ? nowMs() : tr.points.front().t},
-  };
+  const QByteArray gz = perun::gzip(perun::toGpx(tr));
+  const QString runId = QStringLiteral("run-%1-%2").arg(nowMs()).arg(n);
 
-  const std::vector<uint8_t> enc = perun::encodeTrack(tr);
-  const QByteArray b64 =
-      QByteArray(reinterpret_cast<const char *>(enc.data()),
-                 static_cast<int>(enc.size()))
-          .toBase64();
+  const QString err = sendChunks(runId, gz);
+  if (!err.isEmpty())
+    return err;
 
-  const QJsonObject env{
-      {"v", 1}, {"type", "RUN"}, {"run", meta}, {"track", QString::fromLatin1(b64)}};
-  const QByteArray bytes = QJsonDocument(env).toJson(QJsonDocument::Compact);
+  // Local echo — the relay won't loop our own message back.
+  ingestGzTrack(runId, gz);
+  return QString();
+}
 
-  LogosResult r = modules().delivery_module.send(kTopic, bytes);
-  if (!r.success) {
-    logEvent("send failed: " + r.getError().toStdString());
-    return r.getError();
+QString PerunAnalyticsBackend::sendChunks(const QString &runId,
+                                          const QByteArray &gz) {
+  const int total = std::max(
+      1, static_cast<int>((gz.size() + kChunkBudget - 1) / kChunkBudget));
+  for (int seq = 0; seq < total; ++seq) {
+    const QByteArray part = gz.mid(seq * kChunkBudget, kChunkBudget);
+    const QJsonObject env{
+        {"v", 1}, {"type", "CHUNK"}, {"id", runId}, {"seq", seq},
+        {"total", total},
+        {"gz", QString::fromLatin1(part.toBase64())}};
+    LogosResult r = modules().delivery_module.send(
+        kTopic, QJsonDocument(env).toJson(QJsonDocument::Compact));
+    if (!r.success) {
+      logEvent("send chunk failed: " + r.getError().toStdString());
+      return r.getError();
+    }
   }
-  logEvent("published RUN (" + std::to_string(enc.size()) + "B track, " +
-           std::to_string(bytes.size()) + "B msg) requestId=" +
-           r.getString().toStdString());
-
-  // Local echo — relay won't loop our own message back.
-  ingestTrackRun(meta, tr);
+  logEvent("published " + std::to_string(total) + " chunk(s), " +
+           std::to_string(gz.size()) + "B gz for " + runId.toStdString());
   return QString();
 }
 
-QString PerunAnalyticsBackend::ingestRun(QString runJson) {
-  QJsonParseError err{};
-  const QJsonDocument doc = QJsonDocument::fromJson(runJson.toUtf8(), &err);
-  if (err.error != QJsonParseError::NoError || !doc.isObject())
-    return QStringLiteral("invalid run JSON: %1").arg(err.errorString());
-  addRun(doc.object());
-  return QString();
+void PerunAnalyticsBackend::ingestGzTrack(const QString &runId,
+                                          const QByteArray &gz) {
+  try {
+    const perun::Track tr = perun::fromGpx(perun::gunzip(gz));
+    addRun(runToJson(runId, tr),
+           QByteArray(gz.constData(), gz.size()));
+  } catch (const std::exception &e) {
+    logEvent(std::string("ingest failed: ") + e.what());
+  }
 }
 
-QJsonObject PerunAnalyticsBackend::runToJson(const QJsonObject &meta,
+QJsonObject PerunAnalyticsBackend::runToJson(const QString &runId,
                                              const perun::Track &tr) const {
   const perun::RunSummary s = perun::computeSummary(tr);
   const std::vector<perun::Split> splits = perun::computeSplits(tr);
 
-  QJsonObject run = meta; // id, name, startTs
-  run[QStringLiteral("summary")] = QJsonObject{
-      {"distanceM", s.distanceM},
-      {"durationS", s.durationS},
-      {"avgPaceSecPerKm", s.avgPaceSecPerKm},
-      {"elevGainM", s.elevGainM},
-      {"avgHr", s.avgHr},
-      {"hasHr", s.hasHr},
+  QJsonObject run{
+      {"id", runId},
+      {"name", QString::fromStdString(tr.name)},
+      {"startTs", tr.points.empty() ? nowMs()
+                                    : static_cast<qint64>(tr.points.front().t)},
+      {"points", static_cast<int>(tr.points.size())},
   };
+  run[QStringLiteral("summary")] = QJsonObject{
+      {"distanceM", s.distanceM}, {"durationS", s.durationS},
+      {"avgPaceSecPerKm", s.avgPaceSecPerKm}, {"elevGainM", s.elevGainM},
+      {"avgHr", s.avgHr}, {"hasHr", s.hasHr}};
   QJsonArray sp;
   for (const auto &x : splits)
-    sp.append(QJsonObject{
-        {"index", x.index},
-        {"distanceM", x.distanceM},
-        {"durationS", x.durationS},
-        {"paceSecPerKm", x.paceSecPerKm},
-        {"elevGainM", x.elevGainM},
-        {"avgHr", x.avgHr},
-    });
+    sp.append(QJsonObject{{"index", x.index}, {"distanceM", x.distanceM},
+                          {"durationS", x.durationS},
+                          {"paceSecPerKm", x.paceSecPerKm},
+                          {"elevGainM", x.elevGainM}, {"avgHr", x.avgHr}});
   run[QStringLiteral("splits")] = sp;
-  run[QStringLiteral("points")] = static_cast<int>(tr.points.size());
   return run;
 }
 
-void PerunAnalyticsBackend::ingestTrackRun(const QJsonObject &meta,
-                                           const perun::Track &tr) {
-  addRun(runToJson(meta, tr));
-}
-
-void PerunAnalyticsBackend::addRun(const QJsonObject &run) {
-  if (!run.contains(QStringLiteral("id"))) {
-    logEvent("skipped run without id");
-    return;
-  }
+void PerunAnalyticsBackend::addRun(const QJsonObject &run,
+                                   const QByteArray &gz) {
   const QJsonValue id = run.value(QStringLiteral("id"));
+  if (id.toString().isEmpty())
+    return;
   for (int i = 0; i < m_runs.size(); ++i)
     if (m_runs.at(i).toObject().value(QStringLiteral("id")) == id)
       return;
-  m_runs.prepend(run); // newest first
+
+  m_runs.prepend(run);
   publishRuns();
 
-  // Persist to the local SQLite store so runs survive restarts.
   const QByteArray j = QJsonDocument(run).toJson(QJsonDocument::Compact);
   m_store.upsert(id.toString().toStdString(),
                  static_cast<int64_t>(run.value(QStringLiteral("startTs")).toDouble()),
-                 std::string(j.constData(), static_cast<size_t>(j.size())));
+                 std::string(j.constData(), static_cast<size_t>(j.size())),
+                 std::string(gz.constData(), static_cast<size_t>(gz.size())));
   logEvent("added run id=" + id.toString().toStdString());
 }
 
 void PerunAnalyticsBackend::publishRuns() {
   setRunsJson(QString::fromUtf8(
       QJsonDocument(m_runs).toJson(QJsonDocument::Compact)));
+}
+
+QString PerunAnalyticsBackend::trackJson(QString runId) {
+  const std::string gzs = m_store.getGpx(runId.toStdString());
+  if (gzs.empty())
+    return QStringLiteral("[]");
+  try {
+    const perun::Track tr = perun::fromGpx(
+        perun::gunzip(QByteArray(gzs.data(), static_cast<int>(gzs.size()))));
+    QJsonArray pts;
+    for (const auto &p : tr.points)
+      pts.append(QJsonObject{{"lat", p.lat}, {"lon", p.lon}, {"alt", p.alt},
+                             {"hr", p.hr}, {"t", static_cast<qint64>(p.t)}});
+    return QString::fromUtf8(QJsonDocument(pts).toJson(QJsonDocument::Compact));
+  } catch (const std::exception &e) {
+    logEvent(std::string("trackJson failed: ") + e.what());
+    return QStringLiteral("[]");
+  }
+}
+
+QString PerunAnalyticsBackend::exportGpx(QString runId) {
+  const std::string gzs = m_store.getGpx(runId.toStdString());
+  if (gzs.empty())
+    return QString();
+  try {
+    const QByteArray gpx =
+        perun::gunzip(QByteArray(gzs.data(), static_cast<int>(gzs.size())));
+    const QString dir = m_dataDir + QStringLiteral("/exports");
+    QDir().mkpath(dir);
+    const QString path = dir + "/" + runId + QStringLiteral(".gpx");
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly))
+      return QString();
+    f.write(gpx);
+    f.close();
+    logEvent("exported " + path.toStdString());
+    return path;
+  } catch (const std::exception &e) {
+    logEvent(std::string("exportGpx failed: ") + e.what());
+    return QString();
+  }
 }

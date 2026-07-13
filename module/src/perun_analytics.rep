@@ -12,14 +12,17 @@ class PerunAnalytics
     PROP(QString topic="" READONLY)
 
     // JSON array of run summaries for the list view, e.g.
-    // [{ "id","name","startTs","distanceM","durationS","avgPaceSecPerKm" }, …]
+    // [{ "id","name","startTs","summary":{…},"splits":[…] }, …]
     PROP(QString runsJson="[]" READONLY)
 
-    // Publish a synthetic run over Logos Delivery — stands in for the mobile
-    // app until it exists, so two instances can demonstrate send→receive.
-    // Returns "" on success, or an error description.
+    // Publish a synthetic run (as gzipped GPX, chunked) over Logos Delivery —
+    // stand-in for the mobile app. Returns "" on success, or an error.
     SLOT(QString publishSampleRun())
 
-    // Local-only ingest (no network) — kept for offline UI testing.
-    SLOT(QString ingestRun(QString runJson))
+    // Decoded track points for a run, as JSON [{lat,lon,alt,hr,t}, …] (for the
+    // route map). Empty array if unknown.
+    SLOT(QString trackJson(QString runId))
+
+    // Write the run out as a .gpx file; returns the file path ("" on error).
+    SLOT(QString exportGpx(QString runId))
 }
