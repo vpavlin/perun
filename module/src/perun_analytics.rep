@@ -1,0 +1,18 @@
+// View contract for the Perun Analytics UI module. QML gets a typed replica of
+// this via logos.module("perun_analytics"): PROPs auto-sync, SLOTs are callable.
+class PerunAnalytics
+{
+    // Human-readable status line (bootstrap → connection → ready).
+    PROP(QString status="Starting…" READONLY)
+
+    // True once the backend is ready to accept runs.
+    PROP(bool ready=false READONLY)
+
+    // JSON array of run summaries for the list view, e.g.
+    // [{ "id","name","startTs","distanceM","durationS","avgPaceSecPerKm" }, …]
+    PROP(QString runsJson="[]" READONLY)
+
+    // Test hook until Delivery is wired: ingest one run summary as JSON.
+    // Returns "" on success, or an error description.
+    SLOT(QString ingestRun(QString runJson))
+}

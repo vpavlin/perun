@@ -1,0 +1,28 @@
+{
+  "name": "perun_analytics",
+  "display_name": "Perun Analytics",
+  "version": "0.1.0",
+  "type": "ui_qml",
+  "interface": "universal",
+  "category": "fitness",
+  "description": "Detailed running analytics for Perun — ingests runs synced over Logos Delivery and shows splits, elevation, pace and trends.",
+  "main": "perun_analytics_plugin",
+  "icon": null,
+  "view": "qml/Main.qml",
+  "dependencies": [],
+  "codegen": { "rep": "src/perun_analytics.rep" },
+
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  }
+}
