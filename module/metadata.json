@@ -9,7 +9,7 @@
   "main": "perun_analytics_plugin",
   "icon": null,
   "view": "qml/Main.qml",
-  "dependencies": [],
+  "dependencies": ["delivery_module"],
   "codegen": { "rep": "src/perun_analytics.rep" },
 
   "nix": {

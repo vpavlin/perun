@@ -44,9 +44,15 @@ Item {
         }
 
         LogosText {
-            text: root.ready ? ("Connected · " + root.status) : "Connecting to backend…"
+            text: root.ready ? root.status : "Connecting to backend…"
             color: root.ready ? Theme.palette.success : Theme.palette.warning
             font.pixelSize: 13
+        }
+
+        LogosText {
+            text: backend && backend.topic ? ("topic: " + backend.topic) : ""
+            color: Theme.palette.textTertiary
+            font.pixelSize: 11
         }
 
         // Runs list
@@ -114,24 +120,15 @@ Item {
             }
         }
 
-        // Test hook until Delivery is wired: inject a sample run.
+        // Publish a synthetic run over Logos Delivery (stands in for the phone
+        // until the mobile app exists). A second instance on the same topic
+        // receives it.
         LogosButton {
-            text: "Add sample run"
+            text: "Publish sample run"
             enabled: root.ready
-            onClicked: {
-                var i = root.runs.length + 1;
-                var sample = {
-                    id: "sample-" + i,
-                    name: "Sample run " + i,
-                    startTs: Date.now(),
-                    distanceM: 4000 + i * 1200,
-                    durationS: 1500 + i * 300,
-                    avgPaceSecPerKm: 300 + (i % 5) * 8
-                };
-                logos.watch(backend.ingestRun(JSON.stringify(sample)),
-                            function () {},
-                            function (e) { console.log("ingestRun error:", e); });
-            }
+            onClicked: logos.watch(backend.publishSampleRun(),
+                                   function () {},
+                                   function (e) { console.log("publish error:", e); });
         }
     }
 }

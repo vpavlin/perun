@@ -1,5 +1,7 @@
 node_modules/
 *.log
+screenshot*.png
+smoke*.png
 .DS_Store
 # build artifacts
 build/
