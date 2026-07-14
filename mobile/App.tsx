@@ -126,7 +126,7 @@ function Detail({ run }: { run: Run }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.bg },
+  root: { flex: 1, backgroundColor: theme.bg, paddingTop: StatusBar.currentHeight ?? 0 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
   title: { color: theme.text, fontSize: 26, fontWeight: "700" },
   back: { color: theme.primary, fontSize: 16 },
