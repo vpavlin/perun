@@ -300,7 +300,8 @@ QJsonObject PerunAnalyticsBackend::runToJson(const QString &runId, int rev,
       {"id", runId},
       {"rev", rev},
       {"name", QString::fromStdString(tr.name)},
-      {"category", QString::fromStdString(tr.type)},
+      {"sport", QString::fromStdString(tr.sport)},
+      {"category", QString::fromStdString(tr.category)},
       {"startTs", tr.points.empty() ? nowMs()
                                     : static_cast<qint64>(tr.points.front().t)},
       {"points", static_cast<int>(tr.points.size())},
@@ -369,7 +370,9 @@ QString PerunAnalyticsBackend::trackJson(QString runId) {
     QJsonArray pts;
     for (const auto &p : tr.points)
       pts.append(QJsonObject{{"lat", p.lat}, {"lon", p.lon}, {"alt", p.alt},
-                             {"hr", p.hr}, {"t", static_cast<qint64>(p.t)}});
+                             {"hr", p.hr}, {"t", static_cast<qint64>(p.t)},
+                             // The map must not draw across a pause.
+                             {"brk", p.brk}});
     return QString::fromUtf8(QJsonDocument(pts).toJson(QJsonDocument::Compact));
   } catch (const std::exception &e) {
     logEvent(std::string("trackJson failed: ") + e.what());
@@ -448,12 +451,17 @@ QString PerunAnalyticsBackend::qrMatrix(QString text) {
 }
 
 QString PerunAnalyticsBackend::setTileRoot(QString dirUrl) {
-  // QML passes Qt.resolvedUrl(".") — a file:// URL to the plugin's qml dir, the
-  // one place the sandbox lets Image load from. Cache tiles under it.
+  // The view passes Qt.resolvedUrl(".") — a file:// URL to the dir Main.qml was
+  // loaded from, which IS inside the plugin sandbox (that's where the engine
+  // loaded the view from in the first place). Tiles cached under it are
+  // therefore readable by Image.
   QString path = QUrl(dirUrl).isLocalFile() ? QUrl(dirUrl).toLocalFile() : dirUrl;
   while (path.endsWith('/'))
     path.chop(1);
   m_tileRoot = path;
+  // Logged because a wrong root is invisible otherwise — it just looks like
+  // "tiles don't work". Compare this against the sandbox root in the ui-host
+  // log if tiles are blocked.
   logEvent("tile root = " + m_tileRoot.toStdString());
   return QString();
 }
@@ -467,9 +475,11 @@ QString PerunAnalyticsBackend::ensureTile(int z, int x, int y) {
   if (x < 0 || x >= n || y < 0 || y >= n)
     return QString();
 
-  // Cache under the sandbox-readable plugin dir (set by the view); fall back to
-  // the data dir only if the view never called setTileRoot (tiles then unusable
-  // by QML, but the backend still won't error).
+  // Cache under the sandbox-readable tile root the view gave us. Falling back to
+  // the data dir keeps the backend working, but those tiles WILL be blocked by
+  // the sandbox — so say so once rather than failing mutely.
+  if (m_tileRoot.isEmpty())
+    logEvent("tile root unset — tiles will be sandbox-blocked");
   const QString dir =
       (m_tileRoot.isEmpty() ? m_dataDir : m_tileRoot) + QStringLiteral("/tiles");
   const QString path =
@@ -524,8 +534,10 @@ QString PerunAnalyticsBackend::ensureTile(int z, int x, int y) {
 
   // Atomic write: a truncated download must never be cached and served forever.
   QSaveFile f(path);
-  if (!f.open(QIODevice::WriteOnly))
+  if (!f.open(QIODevice::WriteOnly)) {
+    logEvent("tile cache write failed (unwritable root?): " + dir.toStdString());
     return QString();
+  }
   f.write(data);
   if (!f.commit())
     return QString();

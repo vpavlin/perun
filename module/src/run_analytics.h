@@ -52,15 +52,23 @@ inline RunSummary computeSummary(const Track &tr) {
     return s;
   double hrSum = 0;
   int hrCount = 0;
+  int64_t movingMs = 0;
   for (size_t i = 1; i < p.size(); ++i) {
-    s.distanceM += detail::haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
-    if (tr.hasAlt) {
-      const double d = p[i].alt - p[i - 1].alt;
-      if (d > 0) s.elevGainM += d;
+    // Skip the pair spanning a pause: no distance covered by the activity, and
+    // the wall time in between is not moving time.
+    if (!p[i].brk) {
+      s.distanceM += detail::haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
+      movingMs += p[i].t - p[i - 1].t;
+      if (tr.hasAlt) {
+        const double d = p[i].alt - p[i - 1].alt;
+        if (d > 0) s.elevGainM += d;
+      }
     }
     if (tr.hasHr) { hrSum += p[i].hr; ++hrCount; }
   }
-  s.durationS = (p.back().t - p.front().t) / 1000.0;
+  // Sum of per-step deltas, not back-minus-front: identical when there are no
+  // breaks, so unpaused runs are unaffected.
+  s.durationS = movingMs / 1000.0;
   if (s.durationS > 0) s.avgSpeedMps = s.distanceM / s.durationS;
   if (s.distanceM > 0) s.avgPaceSecPerKm = s.durationS / (s.distanceM / 1000.0);
   if (hrCount) { s.avgHr = hrSum / hrCount; }
@@ -76,13 +84,15 @@ inline std::vector<Split> computeSplits(const Track &tr, double splitMeters = 10
   int idx = 1;
   double splitDist = 0, splitElev = 0, hrSum = 0;
   int hrCount = 0;
-  int64_t splitStartT = p.front().t;
+  // Accumulate moving time so a pause mid-kilometre doesn't inflate that
+  // split's pace.
+  int64_t splitMs = 0;
 
-  auto close = [&](int64_t endT) {
+  auto close = [&]() {
     Split sp;
     sp.index = idx++;
     sp.distanceM = splitDist;
-    sp.durationS = (endT - splitStartT) / 1000.0;
+    sp.durationS = splitMs / 1000.0;
     sp.elevGainM = splitElev;
     sp.avgHr = hrCount ? hrSum / hrCount : 0;
     sp.paceSecPerKm = splitDist > 0 ? sp.durationS / (splitDist / 1000.0) : 0;
@@ -90,22 +100,24 @@ inline std::vector<Split> computeSplits(const Track &tr, double splitMeters = 10
   };
 
   for (size_t i = 1; i < p.size(); ++i) {
-    splitDist += detail::haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
-    if (tr.hasAlt) {
-      const double d = p[i].alt - p[i - 1].alt;
-      if (d > 0) splitElev += d;
+    if (!p[i].brk) {
+      splitDist += detail::haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
+      splitMs += p[i].t - p[i - 1].t;
+      if (tr.hasAlt) {
+        const double d = p[i].alt - p[i - 1].alt;
+        if (d > 0) splitElev += d;
+      }
     }
     if (tr.hasHr) { hrSum += p[i].hr; ++hrCount; }
 
     if (splitDist >= splitMeters) {
-      close(p[i].t);
-      splitStartT = p[i].t;
-      splitDist = 0; splitElev = 0; hrSum = 0; hrCount = 0;
+      close();
+      splitDist = 0; splitElev = 0; hrSum = 0; hrCount = 0; splitMs = 0;
     }
   }
   // Trailing partial km (ignore sub-metre dust).
   if (splitDist > 1.0)
-    close(p.back().t);
+    close();
   return splits;
 }
 

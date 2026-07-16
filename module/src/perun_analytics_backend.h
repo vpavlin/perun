@@ -77,8 +77,8 @@ private:
 
   // Lazily created on the backend thread for OSM tile fetches (ensureTile).
   QNetworkAccessManager *m_net = nullptr;
-  // Filesystem dir the QML sandbox can read tiles from (the plugin's qml dir).
-  // Empty until the view calls setTileRoot(); tiles cached under <root>/tiles.
+  // Filesystem dir the QML sandbox can read tiles from (the plugin's qml dir),
+  // set by the view via setTileRoot(). Empty until then.
   QString m_tileRoot;
 
   // Chunk reassembly buffers, keyed by runId.

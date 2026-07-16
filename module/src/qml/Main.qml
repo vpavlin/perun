@@ -29,9 +29,15 @@ Item {
     }
     Component.onCompleted: {
         root.ready = root.backend !== null && logos.isViewModuleReady("perun_analytics");
-        // Cache OSM tiles under the plugin's own qml dir — the only place the
-        // Basecamp QML sandbox lets Image load files from.
-        if (backend) logos.watch(backend.setTileRoot(Qt.resolvedUrl(".")), function () {}, function () {});
+        // Cache tiles in this view's own directory. It is by definition inside
+        // the plugin sandbox — the engine just loaded Main.qml from it — so an
+        // Image can read a file:// URL under it. Logged so a wrong root is
+        // diagnosable from the ui-host output rather than looking like a
+        // generic "tiles don't work".
+        if (backend) {
+            console.log("[perun] tile root ->", Qt.resolvedUrl("."));
+            logos.watch(backend.setTileRoot(Qt.resolvedUrl(".")), function () {}, function () {});
+        }
         fetchTrack();
     }
 
@@ -59,6 +65,32 @@ Item {
     }
     function fmtElev(m) { return Math.round(m || 0) + " m"; }
 
+    // Sport table — mirrors SPORTS in mobile/src/lib/types.ts and isKnownSport()
+    // in src/geo.h. `foot` decides pace-vs-speed: min/km is a runner's unit and
+    // reads as nonsense on a bike.
+    readonly property var sports: [
+        { id: "running",       label: "Run",   foot: true  },
+        { id: "trail_running", label: "Trail", foot: true  },
+        { id: "walking",       label: "Walk",  foot: true  },
+        { id: "hiking",        label: "Hike",  foot: true  },
+        { id: "cycling",       label: "Ride",  foot: false },
+        { id: "mtb",           label: "MTB",   foot: false }
+    ]
+    function sportInfo(id) {
+        for (var i = 0; i < sports.length; i++)
+            if (sports[i].id === id) return sports[i];
+        return sports[0];
+    }
+    function fmtSpeed(s) { return (!s || s <= 0) ? "—" : (3600 / s).toFixed(1) + " km/h"; }
+    function fmtRate(s, foot) { return foot ? fmtPace(s) : fmtSpeed(s); }
+    /** "Run · Tempo", or just the sport, or just the category — no stray dots. */
+    function sportLine(run) {
+        var parts = [];
+        if (run.sport) parts.push(sportInfo(run.sport).label);
+        if (run.category) parts.push(run.category);
+        return parts.join("  ·  ");
+    }
+
     Rectangle { anchors.fill: parent; color: Theme.palette.background }
 
     ColumnLayout {
@@ -83,10 +115,23 @@ Item {
             font.pixelSize: 11
         }
 
+        // ---- Master/detail, split HORIZONTALLY ----
+        // Was stacked vertically: the list got a hardcoded 150px (≈2 rows) while
+        // the summary tiles, map and splits fought over what was left. On a wide
+        // desktop window that wasted the horizontal space entirely.
+        // SplitView, not a fixed RowLayout, so the divider is draggable.
+        SplitView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            orientation: Qt.Horizontal
+
         // ---- Run list (master) ----
         Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 150
+            // SplitView.* attached props here — NOT Layout.*: this Rectangle's
+            // parent is the SplitView, so Layout.fillWidth would be ignored.
+            SplitView.preferredWidth: 320
+            SplitView.minimumWidth: 240
+            SplitView.fillWidth: false
             color: Theme.palette.backgroundInset
             radius: Theme.spacing.radiusMedium
             border.color: Theme.palette.borderHairline
@@ -112,19 +157,32 @@ Item {
                         anchors.fill: parent
                         anchors.margins: Theme.spacing.medium
                         spacing: Theme.spacing.medium
+                        // fillWidth + elide on BOTH lines: in a 320px side panel
+                        // a long auto-generated name ("Ride · Tue 14 Nov 09:12")
+                        // would otherwise push the pace off the row.
                         ColumnLayout {
+                            Layout.fillWidth: true
                             spacing: 2
-                            LogosText { text: modelData.name || modelData.id; color: Theme.palette.text; font.pixelSize: 15 }
+                            LogosText {
+                                text: modelData.name || modelData.id
+                                color: Theme.palette.text; font.pixelSize: 15
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
                             LogosText {
                                 text: root.fmtDist(modelData.summary ? modelData.summary.distanceM : 0)
                                       + "  ·  " + root.fmtDur(modelData.summary ? modelData.summary.durationS : 0)
+                                      + (root.sportLine(modelData) ? "  ·  " + root.sportLine(modelData) : "")
                                 color: Theme.palette.textSecondary; font.pixelSize: 12
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
                             }
                         }
-                        Item { Layout.fillWidth: true }
                         LogosText {
-                            text: root.fmtPace(modelData.summary ? modelData.summary.avgPaceSecPerKm : 0)
+                            text: root.fmtRate(modelData.summary ? modelData.summary.avgPaceSecPerKm : 0,
+                                               root.sportInfo(modelData.sport).foot)
                             color: Theme.palette.textSecondary; font.pixelSize: 13
+                            Layout.alignment: Qt.AlignVCenter
                         }
                     }
                 }
@@ -139,8 +197,8 @@ Item {
 
         // ---- Detail: summary tiles + route map + splits ----
         Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            SplitView.fillWidth: true
+            SplitView.minimumWidth: 360
             color: Theme.palette.backgroundInset
             radius: Theme.spacing.radiusMedium
             border.color: Theme.palette.borderHairline
@@ -160,7 +218,9 @@ Item {
                         model: root.selectedRun ? [
                             { k: "Distance", v: root.fmtDist(root.selectedRun.summary.distanceM) },
                             { k: "Time",     v: root.fmtDur(root.selectedRun.summary.durationS) },
-                            { k: "Avg pace", v: root.fmtPace(root.selectedRun.summary.avgPaceSecPerKm) },
+                            { k: "Avg " + (root.sportInfo(root.selectedRun.sport).foot ? "pace" : "speed"),
+                              v: root.fmtRate(root.selectedRun.summary.avgPaceSecPerKm,
+                                              root.sportInfo(root.selectedRun.sport).foot) },
                             { k: "Elev gain",v: root.fmtElev(root.selectedRun.summary.elevGainM) },
                             { k: "Avg HR",   v: (root.selectedRun.summary.hasHr ? Math.round(root.selectedRun.summary.avgHr) + " bpm" : "—") }
                         ] : []
@@ -196,6 +256,9 @@ Item {
                     // Mercator layout {z,scale,originX,originY,tiles[],key} or null.
                     property var layout: null
                     property var routePts: []
+                    // routePts split at pauses — one polyline per <trkseg>, so
+                    // the map shows a gap instead of a line across the pause.
+                    property var routeSegs: []
                     property point startPt: Qt.point(0, 0)
                     property point endPt: Qt.point(0, 0)
                     // tile id "z/x/y" -> file:// url; hasTiles once any is shown.
@@ -216,7 +279,7 @@ Item {
                         hasTiles = false;
                         tileUris = {};
                         if (!pts || pts.length < 2 || width <= 0 || height <= 0) {
-                            layout = null; routePts = []; return;
+                            layout = null; routePts = []; routeSegs = []; return;
                         }
                         // Track bbox in normalised Mercator units.
                         var x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
@@ -253,16 +316,28 @@ Item {
 
                         // Track through the identical transform that places tiles.
                         var out = [];
-                        for (i = 0; i < pts.length; i++)
-                            out.push(Qt.point(originX + mercX(pts[i].lon) * scale,
-                                              originY + mercY(pts[i].lat) * scale));
+                        var segs = [];
+                        var cur = [];
+                        for (i = 0; i < pts.length; i++) {
+                            var pt = Qt.point(originX + mercX(pts[i].lon) * scale,
+                                              originY + mercY(pts[i].lat) * scale);
+                            if (pts[i].brk && cur.length > 0) { segs.push(cur); cur = []; }
+                            cur.push(pt);
+                            out.push(pt);
+                        }
+                        if (cur.length > 0) segs.push(cur);
                         routePts = out;
+                        routeSegs = segs;
                         startPt = out[0];
                         endPt = out[out.length - 1];
 
-                        // Tiles are fetched by the C++ backend (which has network)
-                        // and cached under the plugin's qml dir (setTileRoot), the
-                        // one place the QML sandbox can load Image files from.
+                        // Tiles are fetched by the C++ backend (this QML engine
+                        // has no network) and cached under the view's own dir,
+                        // then loaded as file:// — which Image reads off disk
+                        // WITHOUT the network. A data: URI does NOT work here:
+                        // QQuickImage routes it through the NAM, which is
+                        // disabled ("Network access disabled for this QML
+                        // engine").
                         fetchTiles();
                     }
 
@@ -331,15 +406,20 @@ Item {
                         opacity: 0.45
                     }
 
-                    Shape {
-                        anchors.fill: parent
-                        ShapePath {
-                            strokeColor: Theme.palette.primary
-                            strokeWidth: 2.5
-                            fillColor: "transparent"
-                            capStyle: ShapePath.RoundCap
-                            joinStyle: ShapePath.RoundJoin
-                            PathPolyline { path: mapBox.routePts }
+                    // One Shape per segment: ShapePath isn't an Item, so a
+                    // Repeater has to model the Shapes, not the paths.
+                    Repeater {
+                        model: mapBox.routeSegs
+                        Shape {
+                            anchors.fill: parent
+                            ShapePath {
+                                strokeColor: Theme.palette.primary
+                                strokeWidth: 2.5
+                                fillColor: "transparent"
+                                capStyle: ShapePath.RoundCap
+                                joinStyle: ShapePath.RoundJoin
+                                PathPolyline { path: modelData }
+                            }
                         }
                     }
                     Rectangle {
@@ -386,7 +466,10 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     LogosText { text: "KM"; color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.preferredWidth: 40 }
-                    LogosText { text: "PACE"; color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.preferredWidth: 90 }
+                    LogosText {
+                        text: root.sportInfo(root.selectedRun ? root.selectedRun.sport : "").foot ? "PACE" : "SPEED"
+                        color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.preferredWidth: 90
+                    }
                     LogosText { text: "ELEV"; color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.preferredWidth: 70 }
                     LogosText { text: "HR"; color: Theme.palette.textTertiary; font.pixelSize: 11 }
                     Item { Layout.fillWidth: true }
@@ -401,7 +484,11 @@ Item {
                         width: ListView.view ? ListView.view.width : 0
                         height: 26
                         LogosText { text: "" + modelData.index; color: Theme.palette.text; font.pixelSize: 13; Layout.preferredWidth: 40 }
-                        LogosText { text: root.fmtPace(modelData.paceSecPerKm); color: Theme.palette.text; font.pixelSize: 13; Layout.preferredWidth: 90 }
+                        LogosText {
+                            text: root.fmtRate(modelData.paceSecPerKm,
+                                               root.sportInfo(root.selectedRun ? root.selectedRun.sport : "").foot)
+                            color: Theme.palette.text; font.pixelSize: 13; Layout.preferredWidth: 90
+                        }
                         LogosText { text: "+" + root.fmtElev(modelData.elevGainM); color: Theme.palette.textSecondary; font.pixelSize: 13; Layout.preferredWidth: 70 }
                         LogosText { text: modelData.avgHr > 0 ? Math.round(modelData.avgHr) : "—"; color: Theme.palette.textSecondary; font.pixelSize: 13; Layout.preferredWidth: 50 }
                         Rectangle {
@@ -422,11 +509,13 @@ Item {
             LogosText {
                 anchors.centerIn: parent
                 visible: root.selectedRun === null
-                text: "Select a run to see splits"
+                text: "Select a run to see its details"
                 color: Theme.palette.textTertiary
                 font.pixelSize: 14
             }
         }
+
+        } // SplitView
 
         RowLayout {
             Layout.fillWidth: true

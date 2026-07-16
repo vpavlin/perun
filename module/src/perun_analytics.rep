@@ -41,15 +41,24 @@ class PerunAnalytics
     // (row-major), or {"ok":false,"error":…}. Rendered as a grid in the QML.
     SLOT(QString qrMatrix(QString text))
 
-    // Point the tile cache at a sandbox-readable dir (the plugin's own qml dir).
-    // The QML sandbox only lets Image load files from under the plugin dir, so
-    // tiles MUST be cached there — call this once with Qt.resolvedUrl(".").
+
+    // Point the tile cache at a directory the QML sandbox can read: the view
+    // passes Qt.resolvedUrl("."), i.e. the plugin's own qml dir. Call once
+    // before any ensureTile(); without it tiles land in the data dir and the
+    // sandbox blocks them.
     SLOT(QString setTileRoot(QString dirUrl))
 
-    // Ensure an OSM raster basemap tile (Web-Mercator z/x/y) is cached on disk,
-    // returning a file:// URL to the PNG. Fetched at most once, with the
-    // OSM-mandated User-Agent; returns "" if it can't be had (offline / HTTP
-    // error / bad coords) so the QML route map falls back to the plain track.
+    // Fetch an OSM raster basemap tile (Web-Mercator z/x/y), cache it under
+    // <tileRoot>/tiles and return a file:// URL to the PNG. Fetched at most
+    // once, with the OSM-mandated User-Agent; returns "" if it can't be had
+    // (offline / HTTP error / bad coords) so the QML falls back to the plain
+    // track.
+    //
+    // MUST be a file:// URL, NOT a data: URI. QQuickImage routes a data: URI
+    // through the QNetworkAccessManager, which this engine has disabled:
+    //   "QML QQuickImage: Network access disabled for this QML engine"
+    // A file:// source is read straight off disk with no network involved — so
+    // the only requirement is that the path sits inside the plugin sandbox.
     // Additive SLOT — does not touch the delivery/track contract above.
     SLOT(QString ensureTile(int z, int x, int y))
 }
