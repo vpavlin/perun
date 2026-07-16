@@ -20,6 +20,15 @@ Item {
     // Decoded points for the selected run's route map (fetched on demand).
     property var trackPoints: []
 
+    // True once setTileRoot has ACTUALLY landed on the backend. QtRO SLOT calls
+    // from QML are async (they return a pending handle, not the value), so
+    // setTileRoot and ensureTile race: without this gate a tile can be fetched
+    // before the root is set, landing in the backend's data dir — which is NOT
+    // under the plugin sandbox's allowed roots, so the Image read is blocked and
+    // the map silently stays empty. Confirmed pattern:
+    // logos-co/logos-witness-test/docs/photo-display-investigation.md.
+    property bool tileRootReady: false
+
     Connections {
         target: logos
         function onViewModuleReadyChanged(moduleName, isReady) {
@@ -29,19 +38,43 @@ Item {
     }
     Component.onCompleted: {
         root.ready = root.backend !== null && logos.isViewModuleReady("perun_analytics");
-        // Cache tiles in this view's own directory. It is by definition inside
-        // the plugin sandbox — the engine just loaded Main.qml from it — so an
-        // Image can read a file:// URL under it. Logged so a wrong root is
-        // diagnosable from the ui-host output rather than looking like a
-        // generic "tiles don't work".
-        if (backend) {
-            console.log("[perun] tile root ->", Qt.resolvedUrl("."));
-            logos.watch(backend.setTileRoot(Qt.resolvedUrl(".")), function () {}, function () {});
-        }
+        // NB: do NOT call setTileRoot here. Component.onCompleted runs before the
+        // QtRO backend replica is connected — a SLOT call now hits
+        // "connectionToSource is null" and is silently dropped, which is exactly
+        // why the tile root never got set. applyTileRoot() runs later, once the
+        // connection is proven live (see below).
+        applyTileRoot();
         fetchTrack();
     }
 
-    onSelectedRunChanged: fetchTrack()
+    // Point the backend's tile cache at this view's own dir (inside the plugin
+    // sandbox, so Image can read file:// tiles from it). Idempotent and safe to
+    // call repeatedly: it no-ops once set, and each call is a fresh attempt for
+    // the case where earlier ones fired before the replica was connected.
+    function applyTileRoot() {
+        if (root.tileRootReady || !backend) return;
+        console.log("[perun] tile root ->", Qt.resolvedUrl("."));
+        logos.watch(backend.setTileRoot(Qt.resolvedUrl(".")),
+            function () {
+                root.tileRootReady = true;
+                if (mapBox.layout) mapBox.fetchTiles();  // kick the current map
+            },
+            function (e) { console.log("[perun] setTileRoot pending (will retry):", e); });
+    }
+
+    // Selecting a run is the first point the backend connection is provably live
+    // (trackJson resolves here). Retry the tile root then — the initial
+    // Component.onCompleted attempt raced ahead of the connection.
+    onSelectedRunChanged: { applyTileRoot(); fetchTrack(); }
+
+    // Also retry when backend PROPs sync — a PROP update proves the replica is
+    // connected, covering the case where runs load before any manual selection.
+    Connections {
+        target: root.backend
+        ignoreUnknownSignals: true
+        function onRunsJsonChanged() { root.applyTileRoot(); }
+        function onStatusChanged() { root.applyTileRoot(); }
+    }
 
     function fetchTrack() {
         if (!backend || !selectedRun) { root.trackPoints = []; return; }
@@ -346,7 +379,11 @@ Item {
                     // request means no nested event loops there. Cached after the
                     // first load, so re-opening a run is instant.
                     function fetchTiles() {
-                        if (layout && root.backend) fetchNext(layout.key, 0);
+                        // Wait for the tile root to be set on the backend, else
+                        // tiles cache outside the sandbox and are blocked. The
+                        // setTileRoot callback re-invokes this once ready.
+                        if (layout && root.backend && root.tileRootReady)
+                            fetchNext(layout.key, 0);
                     }
                     function fetchNext(lyKey, i) {
                         if (!layout || layout.key !== lyKey) return;   // superseded
