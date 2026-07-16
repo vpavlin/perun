@@ -104,7 +104,138 @@ Companion to `~/perun-rebuild-plan.md`. **Keep this updated as facts are verifie
 - identity via `accounts_module` + real per-owner topic (currently fixed `/perun/1/demo/proto`)
 - elevation profile chart, map view; `.lgx` packaging for real Basecamp install
 
+### Pairing crypto — gotchas (learned)
+- **HKDF empty-salt divergence (cost: silent decrypt failures).** `@noble/hashes` follows
+  RFC 5869 — an empty/absent salt is treated as HashLen (32) zero bytes. OpenSSL's `EVP_KDF`
+  HKDF with a **zero-length** salt octet-string does NOT do this and yields a different PRK →
+  a different `Ke`. Only the *second* HKDF (Ke, which uses salt="") diverged; K (salt=
+  "perun-pair-v1") matched. Symptom would have been "everything derives the same but decrypt
+  fails." Fix: module `hkdf()` substitutes `Bytes(32,0)` when salt is empty. Verified via a
+  cross-impl KAT: phone (`identity.ts`, @noble) seals a message, module (`perun_identity.cpp`,
+  OpenSSL) `open()`s it — see `docs/pairing-crypto.md` vectors. Both ends now byte-identical.
+- **@noble subpath imports need the `.js` suffix** in v2.2.0 (`@noble/hashes/hkdf.js`,
+  `@noble/ciphers/chacha.js`) — Metro/Hermes resolves them; bare Node `require` errors.
+  Same class of bug as pako's missing default export.
+- **ChaCha20-Poly1305 IETF (not XChaCha):** OpenSSL has `EVP_chacha20_poly1305` (12-byte IV);
+  it does NOT have XChaCha. `@noble/ciphers` has both — use `chacha20poly1305` (12-byte nonce)
+  to stay symmetric. Wire = `nonce(12) ‖ ciphertext ‖ tag(16)`; @noble appends the tag, and
+  OpenSSL GET_TAG gives the same 16 bytes → identical layout.
+- **Module crypto tests standalone** (`-DPERUN_IDENTITY_SELFTEST`, g++ + `nixpkgs#openssl`),
+  no Qt, no nix module build — the fast way to prove interop before the heavy LGX rebuild.
+  Note `OSSL_KDF_PARAM_*` constants need `#include <openssl/core_names.h>`.
+
+### Mobile app (Expo/RN) — gotchas (learned)
+- **The recorder MUST filter GPS fixes.** `watchPositionAsync`'s first callback is
+  frequently a STALE cached last-known location from somewhere else entirely (on the
+  emulator: the default California region ~39.24,-123.15). Feeding it straight into the
+  track adds a single ~9,250 km segment → distance reads "9253 km". Real phones also emit
+  low-accuracy first fixes + outlier spikes. Fix (in `recorder.ts` `ingest()`): (1) accuracy
+  gate — drop fixes with `coords.accuracy > 50 m`; (2) speed gate — reject a point whose
+  implied speed from the last accepted point exceeds ~12 m/s (43 km/h); (3) **lone-anchor
+  re-anchor** — if the only point so far keeps diverging from every new fix, the anchor
+  itself is the stale first fix → drop it and re-anchor. Verified on-emulator: forcing the
+  device to California before Record → the CA point is dropped, distance reads a correct
+  1.00 km, GPX export contains zero CA points.
+- **Native deps need a full rebuild, not a Metro reload.** Adding expo-location / async-storage /
+  expo-sharing (native modules) requires `expo prebuild` + gradle rebuild; hot-reloading new
+  JS into a stale APK throws `Cannot find native module 'ExpoLocation'`. Pure-JS changes
+  (e.g. the fix filter) DO hot-reload — force-stop+relaunch pulls the fresh bundle.
+- **`expo run:android` re-runs prebuild every time** and applies config plugins to the
+  generated `AndroidManifest.xml`. If the manifest lacks your app.json permissions, you're
+  looking at a build from BEFORE the app.json edit — check the manifest mtime. `expo prebuild`
+  (clean) regenerates it deterministically.
+- **Emulator GPS = x86_64, and it delivers a constant altitude** (locks to the first fix's
+  `ele`), so elevation-gain reads 0 on emulator regardless of the injected altitudes — a
+  test artifact, not an app bug (real phones vary altitude). Inject a moving route with
+  `adb -s emulator-5554 emu geo fix <lon> <lat> <alt>` in a ~1/s loop; the recorder's
+  1 m / 1 s cadence downsamples (60 fed → ~39 stored trackpoints, like a real run).
+- Native Logos Delivery sync CANNOT be tested on this x86_64 emulator (only arm64
+  `liblogosdelivery.so` exists) — see `native-delivery-integration.md`; validate on a real
+  arm64 phone.
+
+### ✅ RESOLVED 2026-07-14 — sync was PUBLIC and PLAINTEXT, now paired + encrypted
+Historical: sync published gzipped GPX to a fixed **public** topic `/perun/1/demo/proto` with
+no encryption — anyone on the logos.dev cluster-2 relay could read every run (home address,
+routes, schedule). Superseded by the PSK pairing layer: out-of-band 32-byte secret (QR) →
+derived topic → ChaCha20-Poly1305. See `pairing-crypto.md` (with KAT vectors) and
+`wire-contract.md`. `delivery.ts` now throws `NOT_PAIRED` rather than falling back to public.
+
+### libchat — VERDICT: do NOT adopt (2026-07-14)
+Researched because it would supersede bare delivery if it gave identity + E2E + derived
+topics for free. It does not, and the reasons are ranked deliberately — **the missing C FFI
+is NOT the blocker most people would stop at**:
+
+1. **libchat cannot reload DirectV1 MLS state across a restart.** `chat-module/rust-lib/
+   src/module.rs` sets `PERSISTENCE_ENABLED = false` and says why: a DirectV1 conversation's
+   MLS state is never reloaded, so persisting would strand crypto state a restart can't
+   resume. On a phone this is product-fatal (forgets its sync identity every launch), and it
+   is a *libchat* gap — our own FFI layer could not paper over it.
+2. **No C ABI, deliberately removed.** Issue #77 (closed 2026-06-22): *"For the interest of
+   development speed, this is no longer supported and can be removed. Once feature complete
+   appropriate interfaces … can be re-added."* Irony: a proper C FFI was BUILT in April
+   (PR #73 — `safer-ffi`, header generation, C example smoketested under valgrind) and
+   deleted two months later for lack of consumers. Resurrectable: `9d9a691^:crates/client-ffi/`
+   (~4 files).
+3. **Zero mobile signal.** Searches across `logos-messaging/libchat` for `mobile`, `android`,
+   `ios`, `jni`, `uniffi`, `kotlin`, `swift`, `react-native`, `cdylib` → **0 issues each**.
+   No milestones, no roadmap, no changelog.
+4. Also: zero tags/releases (chat_module rev-pins a SHA); discovery layer self-described as
+   "a throwaway testnet helper" to be replaced by λLEZ (`lez-contacts` is a **private** repo);
+   open #121 (delivery acks never fire); #28 (installation key management); identity store is
+   "obfuscated, not protected"; NDK cross-compile fight with
+   `bundled-sqlcipher-vendored-openssl`.
+
+**TRAP:** `logos-chat/library/liblogoschat.h` looks like a drop-in twin of the
+`liblogosdelivery.h` we embed. It is orphaned — pins a libchat submodule from 2026-02-28 via
+`vendor/libchat/conversations`, a path that stopped existing in libchat's April restructure to
+`core/conversations`. Contrast: `liblogosdelivery` ships first-class
+`liblogosdelivery-android-arm64` Make targets; libchat has no Android/NDK/JNI string anywhere.
+
+**Revisit triggers — do NOT watch "did the FFI come back":** watch (1) **does libchat gain
+DirectV1 MLS state reload** — until then the FFI question is moot; and (2) does *any* mobile
+signal appear. Our PSK layer currently gives BETTER unlinkability than libchat anyway
+(libchat's topic derives from a static address; ours from a rotating derived secret).
+
+### Delivery capability gaps (verified against the shipped arm64 .so, 2026-07-15)
+`liblogosdelivery.so` exports exactly 14 `logosdelivery_*` functions: `create_node`,
+`start_node`, `stop_node`, `destroy`, `send`, `subscribe`, `unsubscribe`,
+`set_event_callback`, `get_available_configs`, `get_available_node_info_ids`, `get_node_info`,
+`channel_create`, `channel_send`, `channel_close`.
+
+- **No Store / history query — the blocker for backfill.** The protocol IS compiled in
+  (`/vac/waku/store-query/3.0.0` appears alongside relay/lightpush/filter/peer-exchange, and
+  nwaku's `storenode` confutils plumbing is present), but **no C entry point exists** — so a
+  device only ever sees messages published while it is subscribed. A new Basecamp sees
+  nothing that already exists; a phone reinstall loses everything. Note this is a HARDER wall
+  than Reliable Channels: there the symbols exist and are merely undeclared in the `.lidl`
+  (so the JNI can call them past the contract, as `wakuSend` does for `logosdelivery_send`);
+  here there is no symbol to reach.
+  **Workaround that needs nothing upstream:** republish-on-demand — the paired device holding
+  the runs re-sends them on request over the existing CHUNK envelope. Arguably a better fit
+  for the trust model than relying on a public store node's retention.
+- **Reliable Channels**: `delivery_module`'s `.lidl` does not expose them (verified on master
+  2026-07-14) even though the `.so` exports `logosdelivery_channel_*`.
+
 ## Changelog
+- 2026-07-15: Recorded two verdicts that previously existed only in a session transcript and
+  had to be re-derived: **libchat = do not adopt** (blocker is DirectV1 MLS state reload, NOT
+  the removed FFI) and **Delivery exposes no Store** (protocol compiled in, no C entry point;
+  backfill via republish-on-demand). Marked the PUBLIC/PLAINTEXT gap resolved and corrected
+  `wire-contract.md`'s "Open" section, which still listed encryption/pairing as unimplemented
+  and specified AES-256-GCM where ChaCha20-Poly1305 shipped. Documented multi-device limits
+  (many readers OK; second writer blocked by 3 independent causes).
+  Two silent build traps fixed: `build-apk.sh` never ran `expo prebuild` despite a comment
+  claiming version came from app.json — a bump was ignored and 1.9.0 shipped under a new name
+  (now runs prebuild + hard-fails on mismatch); `build-lgx.sh` updated `dist/` but not
+  `dist/lan/`, so the served LGX drifted a day behind (now publishes both).
+  Found a cross-impl entity bug: the phone's `unesc` decoded only `&lt;/&gt;/&amp;`, so a name
+  the module wrote with an apostrophe arrived as literal `Bob&apos;s`. Both ends now emit
+  byte-identical GPX (verified with a name containing `' " & <`).
+- 2026-07-14: Mobile roadmap parallelized via 4 subagents (recorder / store / gpxExport /
+  native-delivery research) then integrated into App.tsx. Full record→save→view→export flow
+  verified on the KVM emulator with mock-GPS replay. Found + fixed the stale-first-fix
+  distance bug (9253 km → 1.00 km) via GPS fix-quality gating. Native Delivery research
+  landed: arm64-only `.so`, must test on real phone (see native-delivery-integration.md).
 - 2026-07-13: Initial notes. Perun + example-apps verified live. Re-research launched for Basecamp framework and Delivery/Storage.
 - 2026-07-13 (discussion): Decisions locked — RN mobile; phone drops Storage entirely; Delivery push is canonical transport (compact CBOR/protobuf + delta-encode → ~55KB/hr, under 150KB, chunk long runs); HTTP-to-local+Delivery-discovery = optional phase-2 fast path; Storage = Basecamp-side backup only (best-effort); E2E per-run encryption over relay; mix deferred (not prod-ready, preset-level, low value for personal sync, revisit for social sharing); north star = maximize value in Basecamp module (analytics/backup/beacon/accounts/sharing), phone stays thin. See plan §0b.
 - 2026-07-13 (later): Live re-research complete. Big delta — mobile Delivery UNBLOCKED via xAlisher/receiver-android (RN + embedded liblogosdelivery JNI). Storage path/versions corrected; public testnet paused (run own nodes); base64 payloads; SDK 3-repo split; tutorial-v4 canonical. Added §0 update block to plan.md; flipped freshness table to HIGH/current.
