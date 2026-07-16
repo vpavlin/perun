@@ -1,37 +1,101 @@
-// Self-drawn route map (SVG polyline of the GPS track) — the RN counterpart of
-// the module's QtQuick.Shapes map. No tiles/network; auto-scaled with start
-// (green) / end (red) markers.
+// Route map: OSM raster basemap (Web Mercator) with the GPS track drawn on top
+// in the same projection, so the line registers with the map. Tiles are cached
+// on disk and fetched at most once; if none load (offline / fetch error) we fall
+// back to exactly the old behaviour — the track on the plain dark background.
 import React from "react";
-import Svg, { Polyline, Circle } from "react-native-svg";
+import { StyleSheet, Text, View } from "react-native";
+import Svg, { Circle, Image as SvgImage, Polyline, Rect } from "react-native-svg";
+import { buildLayout, getTile, MapLayout, TILE_SIZE } from "../lib/tiles";
 import { GeoPoint } from "../lib/types";
 import { theme } from "../theme";
 
-export function RouteMap({ points, width, height }: { points: GeoPoint[]; width: number; height: number }) {
-  if (!points || points.length < 2) return null;
-  let latMin = 1e9, latMax = -1e9, lonMin = 1e9, lonMax = -1e9;
-  for (const p of points) {
-    if (p.lat < latMin) latMin = p.lat;
-    if (p.lat > latMax) latMax = p.lat;
-    if (p.lon < lonMin) lonMin = p.lon;
-    if (p.lon > lonMax) lonMax = p.lon;
-  }
-  const m = 12;
-  const cosLat = Math.cos(((latMin + latMax) / 2) * Math.PI / 180);
-  const spanX = Math.max(1e-9, (lonMax - lonMin) * cosLat);
-  const spanY = Math.max(1e-9, latMax - latMin);
-  const scale = Math.min((width - 2 * m) / spanX, (height - 2 * m) / spanY);
-  const drawW = spanX * scale, drawH = spanY * scale;
-  const ox = (width - drawW) / 2, oy = (height - drawH) / 2;
-  const X = (p: GeoPoint) => ox + (p.lon - lonMin) * cosLat * scale;
-  const Y = (p: GeoPoint) => oy + drawH - (p.lat - latMin) * scale;
+// Resolve a layout's tiles to file:// URIs. Keyed on layout.key (bbox+zoom), so
+// the live view — which re-renders ~1/s as points stream in — only refetches
+// when the tile set actually changes, not on every new point.
+function useTiles(layout: MapLayout | null): Record<string, string> {
+  const [uris, setUris] = React.useState<Record<string, string>>({});
+  const key = layout?.key;
 
-  const pts = points.map((p) => `${X(p).toFixed(1)},${Y(p).toFixed(1)}`).join(" ");
-  const s = points[0], e = points[points.length - 1];
+  React.useEffect(() => {
+    if (!layout) return;
+    let alive = true;
+    // Don't clear on bbox growth: uris are keyed by tile id (z/x/y) and tile
+    // content is projection-independent, so keeping resolved tiles avoids the
+    // basemap flickering as the live track expands. Stale ids simply go unused.
+    for (const t of layout.tiles) {
+      getTile(t.z, t.x, t.y).then((uri) => {
+        if (alive && uri) setUris((prev) => (prev[t.id] ? prev : { ...prev, [t.id]: uri }));
+      });
+    }
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return uris;
+}
+
+export function RouteMap({ points, width, height }: { points: GeoPoint[]; width: number; height: number }) {
+  const layout = React.useMemo(() => buildLayout(points, width, height), [points, width, height]);
+  const uris = useTiles(layout);
+  if (!points || points.length < 2 || !layout) return null;
+
+  // One polyline per segment: a point flagged `brk` opens a new one, so a pause
+  // shows as a gap instead of a straight line teleporting across the map.
+  const segments: string[] = [];
+  let cur: string[] = [];
+  for (const p of points) {
+    if (p.brk && cur.length) { segments.push(cur.join(" ")); cur = []; }
+    cur.push(layout.project(p).map((n) => n.toFixed(1)).join(","));
+  }
+  if (cur.length) segments.push(cur.join(" "));
+
+  const [sx, sy] = layout.project(points[0]);
+  const [ex, ey] = layout.project(points[points.length - 1]);
+  const hasTiles = layout.tiles.some((t) => uris[t.id]);
+
   return (
-    <Svg width={width} height={height}>
-      <Polyline points={pts} fill="none" stroke={theme.primary} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
-      <Circle cx={X(s)} cy={Y(s)} r={4.5} fill={theme.success} />
-      <Circle cx={X(e)} cy={Y(e)} r={4.5} fill={theme.error} />
-    </Svg>
+    <View>
+      <Svg width={width} height={height}>
+        {layout.tiles.map((t) =>
+          uris[t.id] ? (
+            <SvgImage
+              key={t.key}
+              x={t.sx}
+              y={t.sy}
+              width={TILE_SIZE}
+              height={TILE_SIZE}
+              href={{ uri: uris[t.id] }}
+              preserveAspectRatio="xMidYMid slice"
+            />
+          ) : null
+        )}
+        {/* Dark scrim so bright tiles don't glare and the orange track stays legible. */}
+        {hasTiles && <Rect x={0} y={0} width={width} height={height} fill={theme.bg} opacity={0.45} />}
+        {segments.map((seg, i) => (
+          <Polyline key={i} points={seg} fill="none" stroke={theme.primary} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+        ))}
+        <Circle cx={sx} cy={sy} r={4.5} fill={theme.success} stroke={theme.bg} strokeWidth={1.5} />
+        <Circle cx={ex} cy={ey} r={4.5} fill={theme.error} stroke={theme.bg} strokeWidth={1.5} />
+      </Svg>
+      {/* Required by the OSM tile usage policy whenever tiles are shown. */}
+      {hasTiles && <Text style={styles.attribution}>© OpenStreetMap contributors</Text>}
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  attribution: {
+    position: "absolute",
+    right: 4,
+    bottom: 3,
+    fontSize: 9,
+    color: theme.text,
+    backgroundColor: "rgba(13,16,19,0.55)",
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+});

@@ -23,15 +23,24 @@ export function computeSummary(tr: Track): RunSummary {
   };
   if (p.length < 2) return s;
   let hrSum = 0, hrN = 0;
+  let movingMs = 0;
   for (let i = 1; i < p.length; i++) {
-    s.distanceM += haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
-    if (tr.hasAlt) {
-      const d = (p[i].alt ?? 0) - (p[i - 1].alt ?? 0);
-      if (d > 0) s.elevGainM += d;
+    // A break means the pair (i-1, i) spans a pause: no distance was covered
+    // *by the activity*, and the wall time in between isn't moving time.
+    // Skipping both is what makes pause honest.
+    if (!p[i].brk) {
+      s.distanceM += haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
+      movingMs += p[i].t - p[i - 1].t;
+      if (tr.hasAlt) {
+        const d = (p[i].alt ?? 0) - (p[i - 1].alt ?? 0);
+        if (d > 0) s.elevGainM += d;
+      }
     }
     if (tr.hasHr) { hrSum += p[i].hr ?? 0; hrN++; }
   }
-  s.durationS = (p[p.length - 1].t - p[0].t) / 1000;
+  // Sum of per-step deltas, not last-minus-first: with no breaks the two are
+  // identical, so unpaused runs are unaffected.
+  s.durationS = movingMs / 1000;
   if (s.durationS > 0) s.avgSpeedMps = s.distanceM / s.durationS;
   if (s.distanceM > 0) s.avgPaceSecPerKm = s.durationS / (s.distanceM / 1000);
   if (hrN) s.avgHr = hrSum / hrN;
@@ -42,9 +51,12 @@ export function computeSplits(tr: Track, splitMeters = 1000): Split[] {
   const p = tr.points;
   const splits: Split[] = [];
   if (p.length < 2) return splits;
-  let idx = 1, splitDist = 0, splitElev = 0, hrSum = 0, hrN = 0, startT = p[0].t;
-  const close = (endT: number) => {
-    const dur = (endT - startT) / 1000;
+  let idx = 1, splitDist = 0, splitElev = 0, hrSum = 0, hrN = 0;
+  // Accumulate moving time so a pause mid-kilometre doesn't inflate that split's
+  // pace (elapsed time would make a coffee stop look like a collapse).
+  let splitMs = 0;
+  const close = () => {
+    const dur = splitMs / 1000;
     splits.push({
       index: idx++,
       distanceM: splitDist,
@@ -55,18 +67,21 @@ export function computeSplits(tr: Track, splitMeters = 1000): Split[] {
     });
   };
   for (let i = 1; i < p.length; i++) {
-    splitDist += haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
-    if (tr.hasAlt) {
-      const d = (p[i].alt ?? 0) - (p[i - 1].alt ?? 0);
-      if (d > 0) splitElev += d;
+    if (!p[i].brk) {
+      splitDist += haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
+      splitMs += p[i].t - p[i - 1].t;
+      if (tr.hasAlt) {
+        const d = (p[i].alt ?? 0) - (p[i - 1].alt ?? 0);
+        if (d > 0) splitElev += d;
+      }
     }
     if (tr.hasHr) { hrSum += p[i].hr ?? 0; hrN++; }
     if (splitDist >= splitMeters) {
-      close(p[i].t);
-      startT = p[i].t; splitDist = 0; splitElev = 0; hrSum = 0; hrN = 0;
+      close();
+      splitDist = 0; splitElev = 0; hrSum = 0; hrN = 0; splitMs = 0;
     }
   }
-  if (splitDist > 1) close(p[p.length - 1].t);
+  if (splitDist > 1) close();
   return splits;
 }
 
@@ -84,3 +99,85 @@ export const fmtDur = (s: number) => {
   return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
 };
 export const fmtElev = (m: number) => Math.round(m || 0) + " m";
+
+/** Speed in km/h — what you want for cycling (pace min/km is a runner's unit). */
+export const fmtSpeed = (secPerKm: number) => {
+  if (!secPerKm || secPerKm <= 0) return "—";
+  return (3600 / secPerKm).toFixed(1) + " km/h";
+};
+
+/** Foot sports read pace; wheeled sports read speed. */
+export const fmtRate = (secPerKm: number, foot: boolean) =>
+  foot ? fmtPace(secPerKm) : fmtSpeed(secPerKm);
+export const rateLabel = (foot: boolean) => (foot ? "Pace" : "Speed");
+
+// ---- week grouping -----------------------------------------------------------
+// Training is judged by the week, not the run: a flat reverse-chronological list
+// can't answer "have I done enough this week?", which is the question people
+// actually open a tracker to ask.
+
+/** Local Monday 00:00 of the week containing ts. */
+export function weekStart(ts: number): number {
+  const d = new Date(ts || 0);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // getDay: Sun=0 → Mon=0
+  return d.getTime();
+}
+
+/** Shift by whole days via the Date API, never ts − n*864e5: across a DST change
+ *  a fixed-millisecond week is off by an hour and lands in the wrong week. */
+const addDays = (ts: number, n: number) => {
+  const d = new Date(ts);
+  d.setDate(d.getDate() + n);
+  return d.getTime();
+};
+
+export function fmtWeek(ws: number, now = Date.now()): string {
+  const cur = weekStart(now);
+  if (ws === cur) return "This week";
+  if (ws === weekStart(addDays(cur, -7))) return "Last week";
+  const a = new Date(ws), b = new Date(addDays(ws, 6));
+  const mon = (d: Date) => d.toLocaleDateString(undefined, { month: "short" });
+  return a.getMonth() === b.getMonth()
+    ? `${a.getDate()}–${b.getDate()} ${mon(b)}`
+    : `${a.getDate()} ${mon(a)} – ${b.getDate()} ${mon(b)}`;
+}
+
+export interface WeekSection<T> {
+  weekStart: number;
+  title: string;
+  distanceM: number;
+  durationS: number;
+  data: T[];
+}
+
+/** Group runs (newest-first) into newest-first week sections with totals. */
+export function groupByWeek<T extends { startTs: number; summary: RunSummary }>(
+  runs: T[],
+  now = Date.now()
+): WeekSection<T>[] {
+  const byWeek = new Map<number, T[]>();
+  for (const r of runs) {
+    const k = weekStart(r.startTs);
+    const arr = byWeek.get(k);
+    if (arr) arr.push(r);
+    else byWeek.set(k, [r]);
+  }
+  return [...byWeek.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([ws, data]) => ({
+      weekStart: ws,
+      title: fmtWeek(ws, now),
+      distanceM: data.reduce((s, r) => s + (r.summary?.distanceM ?? 0), 0),
+      durationS: data.reduce((s, r) => s + (r.summary?.durationS ?? 0), 0),
+      data: data.slice().sort((a, b) => b.startTs - a.startTs),
+    }));
+}
+
+/** Run-list dates. The list currently shows none — startTs was stored, never shown. */
+export const fmtDate = (ts: number) => {
+  const d = new Date(ts || 0);
+  const day = d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return `${day} · ${time}`;
+};

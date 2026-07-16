@@ -2,16 +2,28 @@
   "expo": {
     "name": "Perun",
     "slug": "perun",
-    "version": "1.0.0",
+    "version": "1.12.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "co.logos.perun"
+      "bundleIdentifier": "co.logos.perun",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Perun records your route while you run.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Perun keeps recording your route when the screen is off.",
+        "UIBackgroundModes": [
+          "location"
+        ]
+      }
     },
     "android": {
       "package": "co.logos.perun",
+      "versionCode": 14,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#0d1013",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -22,6 +34,25 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "scheme": "perun",
+    "plugins": [
+      "./plugins/withLogosDelivery",
+      "./plugins/withReleaseSigning",
+      "expo-sharing",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Perun records your route while you run."
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Perun scans the pairing QR shown by your Basecamp."
+        }
+      ]
+    ]
   }
 }
