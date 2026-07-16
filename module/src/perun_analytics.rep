@@ -8,8 +8,14 @@ class PerunAnalytics
     // True once the delivery node is up and subscribed.
     PROP(bool ready=false READONLY)
 
-    // The content topic this instance subscribes/publishes on (for display).
-    PROP(QString topic="" READONLY)
+    // 3-word pairing fingerprint (pgp words) of the shared secret. Shown so the
+    // user can confirm it matches the phone. NOT the raw topic — that is
+    // secret-adjacent and must never be displayed.
+    PROP(QString fingerprint="" READONLY)
+
+    // perun://pair?s=<base32-secret> — encoded into the pairing QR the phone
+    // scans. Sensitive (it IS the secret); rendered only as a QR, never as text.
+    PROP(QString pairingUri="" READONLY)
 
     // JSON array of run summaries for the list view, e.g.
     // [{ "id","name","startTs","summary":{…},"splits":[…] }, …]
@@ -25,4 +31,25 @@ class PerunAnalytics
 
     // Write the run out as a .gpx file; returns the file path ("" on error).
     SLOT(QString exportGpx(QString runId))
+
+    // Generate a NEW pairing secret (unpairs every currently-paired phone) and
+    // resubscribe to the new derived topic. Returns "" on success, else an error.
+    SLOT(QString resetPairing())
+
+    // Encode text as a QR matrix in-process (vendored Nayuki encoder — no
+    // external qr module / IPC). Returns JSON {"ok":true,"n":<size>,"cells":[0|1,…]}
+    // (row-major), or {"ok":false,"error":…}. Rendered as a grid in the QML.
+    SLOT(QString qrMatrix(QString text))
+
+    // Point the tile cache at a sandbox-readable dir (the plugin's own qml dir).
+    // The QML sandbox only lets Image load files from under the plugin dir, so
+    // tiles MUST be cached there — call this once with Qt.resolvedUrl(".").
+    SLOT(QString setTileRoot(QString dirUrl))
+
+    // Ensure an OSM raster basemap tile (Web-Mercator z/x/y) is cached on disk,
+    // returning a file:// URL to the PNG. Fetched at most once, with the
+    // OSM-mandated User-Agent; returns "" if it can't be had (offline / HTTP
+    // error / bad coords) so the QML route map falls back to the plain track.
+    // Additive SLOT — does not touch the delivery/track contract above.
+    SLOT(QString ensureTile(int z, int x, int y))
 }

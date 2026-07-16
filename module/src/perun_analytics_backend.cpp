@@ -6,11 +6,18 @@
 #include <QByteArray>
 #include <QDateTime>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QLatin1String>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QUrl>
 #include <QVariantList>
 
 #include "logos_sdk.h"
@@ -18,6 +25,7 @@
 
 #include "gpx.h"
 #include "gzip.h"
+#include "qrcodegen.hpp"
 
 namespace {
 void logEvent(const std::string &what) {
@@ -25,8 +33,25 @@ void logEvent(const std::string &what) {
 }
 qint64 nowMs() { return QDateTime::currentMSecsSinceEpoch(); }
 
+// QByteArray <-> perun::Bytes at the crypto boundary.
+perun::Bytes toBytes(const QByteArray &b) {
+  return perun::Bytes(reinterpret_cast<const uint8_t *>(b.constData()),
+                      reinterpret_cast<const uint8_t *>(b.constData()) + b.size());
+}
+QByteArray fromBytes(const perun::Bytes &b) {
+  return QByteArray(reinterpret_cast<const char *>(b.data()),
+                    static_cast<int>(b.size()));
+}
+
 // Raw bytes per chunk; base64 (~1.33x) + envelope stays under Waku's 150 KB.
 constexpr int kChunkBudget = 100000;
+
+// OSM raster basemap (ensureTile). Cap zoom per the OSM tile usage policy and
+// send an identifying User-Agent on every request:
+// https://operations.osmfoundation.org/policies/tiles/
+constexpr int kMaxTileZoom = 16;
+constexpr int kTileTimeoutMs = 8000;
+const char *const kTileUserAgent = "Perun/1.4 (+https://github.com/vpavlin/perun)";
 
 // A plausible synthetic run near Brno (~3 m/s, GPS/elevation jitter, drifting
 // HR) — stand-in for the mobile app's capture until it exists.
@@ -59,15 +84,45 @@ perun::Track makeSyntheticTrack(int seconds, int hz) {
 }
 } // namespace
 
-const QString PerunAnalyticsBackend::kTopic =
-    QStringLiteral("/perun/1/demo/proto");
-
 void PerunAnalyticsBackend::onContextReady() {
-  logEvent("onContextReady — loading store, scheduling delivery bootstrap");
+  logEvent("onContextReady — loading store + pairing secret, scheduling bootstrap");
   openStoreAndLoad();
-  setTopic(kTopic);
+  loadOrCreateSecret();
   setStatus(QStringLiteral("Starting node…"));
   QTimer::singleShot(0, [this]() { bootstrap(); });
+}
+
+void PerunAnalyticsBackend::applyIdentity(const perun::Bytes &secret) {
+  m_id = perun::deriveIdentity(secret);
+  m_topic = QString::fromStdString(perun::topicFor(m_id));
+  const QString fp = QString::fromStdString(m_id.fpWords[0]) + " " +
+                     QString::fromStdString(m_id.fpWords[1]) + " " +
+                     QString::fromStdString(m_id.fpWords[2]);
+  setFingerprint(fp);
+  setPairingUri(QString::fromStdString(perun::pairingUri(secret)));
+  logEvent("pairing fingerprint: " + fp.toStdString());
+}
+
+void PerunAnalyticsBackend::loadOrCreateSecret() {
+  const QString path = m_dataDir + QStringLiteral("/pair.key");
+  QFile f(path);
+  perun::Bytes secret;
+  if (f.open(QIODevice::ReadOnly)) {
+    const QByteArray raw = f.read(32);
+    f.close();
+    if (raw.size() == 32) secret = toBytes(raw);
+  }
+  if (secret.size() != 32) {
+    secret = perun::randomSecret();
+    QSaveFile out(path);
+    if (out.open(QIODevice::WriteOnly)) {
+      out.write(fromBytes(secret));
+      out.commit();
+      QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    }
+    logEvent("generated a new pairing secret");
+  }
+  applyIdentity(secret);
 }
 
 void PerunAnalyticsBackend::openStoreAndLoad() {
@@ -104,9 +159,16 @@ void PerunAnalyticsBackend::bootstrap() {
       "messageReceived", [this](const QVariantList &data) {
         if (data.size() < 3)
           return;
+        // Payload on the wire is nonce(12)‖ChaCha20-Poly1305(env, aad=topic).
+        // Decrypt with our pairing key; a bad tag = not ours / tampered → drop.
+        bool ok = false;
+        const perun::Bytes pt =
+            perun::open(m_id, toBytes(data.at(2).toByteArray()),
+                        m_topic.toStdString(), &ok);
+        if (!ok)
+          return;
         QJsonParseError err{};
-        const QJsonDocument doc =
-            QJsonDocument::fromJson(data.at(2).toByteArray(), &err);
+        const QJsonDocument doc = QJsonDocument::fromJson(fromBytes(pt), &err);
         if (err.error != QJsonParseError::NoError || !doc.isObject())
           return;
         const QJsonObject env = doc.object();
@@ -115,12 +177,16 @@ void PerunAnalyticsBackend::bootstrap() {
           return;
 
         const QString id = env.value(QStringLiteral("id")).toString();
+        const int rev = env.value(QStringLiteral("rev")).toInt(1); // v1 senders had none
         const int seq = env.value(QStringLiteral("seq")).toInt();
         const int total = env.value(QStringLiteral("total")).toInt();
         const QByteArray part = QByteArray::fromBase64(
             env.value(QStringLiteral("gz")).toString().toLatin1());
 
-        ChunkBuf &buf = m_chunks[id];
+        // Key reassembly by id+rev so an edit arriving mid-transfer of an older
+        // revision never splices chunks from two revisions into one gzip stream.
+        const QString key = id + QStringLiteral("@") + QString::number(rev);
+        ChunkBuf &buf = m_chunks[key];
         buf.total = total;
         buf.parts.insert(seq, part);
         if (buf.parts.size() < total)
@@ -129,10 +195,10 @@ void PerunAnalyticsBackend::bootstrap() {
         QByteArray gz;
         for (int i = 0; i < total; ++i)
           gz += buf.parts.value(i);
-        m_chunks.remove(id);
+        m_chunks.remove(key);
         logEvent("reassembled " + std::to_string(total) + " chunk(s) for " +
-                 id.toStdString());
-        ingestGzTrack(id, gz);
+                 id.toStdString() + " rev " + std::to_string(rev));
+        ingestGzTrack(id, rev, gz);
       });
 
   const QJsonObject cfg{
@@ -150,7 +216,7 @@ void PerunAnalyticsBackend::bootstrap() {
              created.getError().toStdString());
   }
 
-  LogosResult sub = modules().delivery_module.subscribe(kTopic);
+  LogosResult sub = modules().delivery_module.subscribe(m_topic);
   if (!sub.success) {
     setStatus(QStringLiteral("subscribe failed: %1").arg(sub.getError()));
     return;
@@ -158,8 +224,10 @@ void PerunAnalyticsBackend::bootstrap() {
 
   m_nodeReady = true;
   setReady(true);
-  setStatus(QStringLiteral("Connected · %1").arg(kTopic));
-  logEvent("node ready on " + kTopic.toStdString());
+  // Never surface the derived topic (secret-adjacent) — the fingerprint PROP is
+  // the user-facing pairing identity.
+  setStatus(QStringLiteral("Connected · paired"));
+  logEvent("node ready on derived topic");
 
   if (qEnvironmentVariableIsSet("PERUN_TEST_AUTOPUBLISH")) {
     logEvent("PERUN_TEST_AUTOPUBLISH set — publishing a sample run in 12s");
@@ -178,27 +246,30 @@ QString PerunAnalyticsBackend::publishSampleRun() {
   const QByteArray gz = perun::gzip(perun::toGpx(tr));
   const QString runId = QStringLiteral("run-%1-%2").arg(nowMs()).arg(n);
 
-  const QString err = sendChunks(runId, gz);
+  const QString err = sendChunks(runId, /*rev=*/1, gz);
   if (!err.isEmpty())
     return err;
 
   // Local echo — the relay won't loop our own message back.
-  ingestGzTrack(runId, gz);
+  ingestGzTrack(runId, /*rev=*/1, gz);
   return QString();
 }
 
-QString PerunAnalyticsBackend::sendChunks(const QString &runId,
+QString PerunAnalyticsBackend::sendChunks(const QString &runId, int rev,
                                           const QByteArray &gz) {
   const int total = std::max(
       1, static_cast<int>((gz.size() + kChunkBudget - 1) / kChunkBudget));
   for (int seq = 0; seq < total; ++seq) {
     const QByteArray part = gz.mid(seq * kChunkBudget, kChunkBudget);
     const QJsonObject env{
-        {"v", 1}, {"type", "CHUNK"}, {"id", runId}, {"seq", seq},
+        {"v", 3}, {"type", "CHUNK"}, {"id", runId}, {"rev", rev}, {"seq", seq},
         {"total", total},
         {"gz", QString::fromLatin1(part.toBase64())}};
-    LogosResult r = modules().delivery_module.send(
-        kTopic, QJsonDocument(env).toJson(QJsonDocument::Compact));
+    // Encrypt the envelope for the paired phone (same seal format it decrypts).
+    const QByteArray sealed = fromBytes(perun::seal(
+        m_id, toBytes(QJsonDocument(env).toJson(QJsonDocument::Compact)),
+        m_topic.toStdString()));
+    LogosResult r = modules().delivery_module.send(m_topic, sealed);
     if (!r.success) {
       logEvent("send chunk failed: " + r.getError().toStdString());
       return r.getError();
@@ -209,25 +280,27 @@ QString PerunAnalyticsBackend::sendChunks(const QString &runId,
   return QString();
 }
 
-void PerunAnalyticsBackend::ingestGzTrack(const QString &runId,
+void PerunAnalyticsBackend::ingestGzTrack(const QString &runId, int rev,
                                           const QByteArray &gz) {
   try {
     const perun::Track tr = perun::fromGpx(perun::gunzip(gz));
-    addRun(runToJson(runId, tr),
+    addRun(runToJson(runId, rev, tr),
            QByteArray(gz.constData(), gz.size()));
   } catch (const std::exception &e) {
     logEvent(std::string("ingest failed: ") + e.what());
   }
 }
 
-QJsonObject PerunAnalyticsBackend::runToJson(const QString &runId,
+QJsonObject PerunAnalyticsBackend::runToJson(const QString &runId, int rev,
                                              const perun::Track &tr) const {
   const perun::RunSummary s = perun::computeSummary(tr);
   const std::vector<perun::Split> splits = perun::computeSplits(tr);
 
   QJsonObject run{
       {"id", runId},
+      {"rev", rev},
       {"name", QString::fromStdString(tr.name)},
+      {"category", QString::fromStdString(tr.type)},
       {"startTs", tr.points.empty() ? nowMs()
                                     : static_cast<qint64>(tr.points.front().t)},
       {"points", static_cast<int>(tr.points.size())},
@@ -248,22 +321,37 @@ QJsonObject PerunAnalyticsBackend::runToJson(const QString &runId,
 
 void PerunAnalyticsBackend::addRun(const QJsonObject &run,
                                    const QByteArray &gz) {
-  const QJsonValue id = run.value(QStringLiteral("id"));
-  if (id.toString().isEmpty())
+  const QString id = run.value(QStringLiteral("id")).toString();
+  if (id.isEmpty())
     return;
-  for (int i = 0; i < m_runs.size(); ++i)
-    if (m_runs.at(i).toObject().value(QStringLiteral("id")) == id)
-      return;
+  const int rev = run.value(QStringLiteral("rev")).toInt(1);
 
-  m_runs.prepend(run);
+  // Last-write-wins by rev: unknown id → insert; newer rev → replace the stored
+  // copy; same-or-older rev → ignore (idempotent replay / stale edit).
+  int existing = -1;
+  for (int i = 0; i < m_runs.size(); ++i)
+    if (m_runs.at(i).toObject().value(QStringLiteral("id")).toString() == id) {
+      existing = i;
+      break;
+    }
+  if (existing >= 0) {
+    const int storedRev = m_runs.at(existing).toObject().value(QStringLiteral("rev")).toInt(1);
+    if (rev <= storedRev)
+      return; // not newer — drop
+    m_runs.replace(existing, run);
+    logEvent("replaced run id=" + id.toStdString() + " rev " +
+             std::to_string(storedRev) + "→" + std::to_string(rev));
+  } else {
+    m_runs.prepend(run);
+    logEvent("added run id=" + id.toStdString() + " rev " + std::to_string(rev));
+  }
   publishRuns();
 
   const QByteArray j = QJsonDocument(run).toJson(QJsonDocument::Compact);
-  m_store.upsert(id.toString().toStdString(),
+  m_store.upsert(id.toStdString(),
                  static_cast<int64_t>(run.value(QStringLiteral("startTs")).toDouble()),
                  std::string(j.constData(), static_cast<size_t>(j.size())),
                  std::string(gz.constData(), static_cast<size_t>(gz.size())));
-  logEvent("added run id=" + id.toString().toStdString());
 }
 
 void PerunAnalyticsBackend::publishRuns() {
@@ -310,4 +398,137 @@ QString PerunAnalyticsBackend::exportGpx(QString runId) {
     logEvent(std::string("exportGpx failed: ") + e.what());
     return QString();
   }
+}
+
+QString PerunAnalyticsBackend::resetPairing() {
+  const QString oldTopic = m_topic;
+  const perun::Bytes secret = perun::randomSecret();
+  if (secret.size() != 32)
+    return QStringLiteral("failed to generate secret");
+
+  // Persist the new secret, then re-derive identity + topic.
+  const QString path = m_dataDir + QStringLiteral("/pair.key");
+  QSaveFile out(path);
+  if (out.open(QIODevice::WriteOnly)) {
+    out.write(fromBytes(secret));
+    out.commit();
+    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+  }
+  applyIdentity(secret);
+
+  // Move the subscription to the new derived topic.
+  if (m_nodeReady) {
+    if (!oldTopic.isEmpty())
+      modules().delivery_module.unsubscribe(oldTopic);
+    LogosResult sub = modules().delivery_module.subscribe(m_topic);
+    if (!sub.success)
+      return sub.getError();
+  }
+  logEvent("pairing reset — old phones unpaired");
+  return QString();
+}
+
+QString PerunAnalyticsBackend::qrMatrix(QString text) {
+  if (text.isEmpty())
+    return QStringLiteral("{\"ok\":false,\"error\":\"empty\"}");
+  try {
+    const qrcodegen::QrCode qr = qrcodegen::QrCode::encodeText(
+        text.toUtf8().constData(), qrcodegen::QrCode::Ecc::MEDIUM);
+    const int n = qr.getSize();
+    QJsonArray cells;
+    for (int y = 0; y < n; ++y)
+      for (int x = 0; x < n; ++x)
+        cells.append(qr.getModule(x, y) ? 1 : 0);
+    const QJsonObject o{{"ok", true}, {"n", n}, {"cells", cells}};
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+  } catch (const std::exception &e) {
+    logEvent(std::string("qrMatrix failed: ") + e.what());
+    return QStringLiteral("{\"ok\":false,\"error\":\"encode failed\"}");
+  }
+}
+
+QString PerunAnalyticsBackend::setTileRoot(QString dirUrl) {
+  // QML passes Qt.resolvedUrl(".") — a file:// URL to the plugin's qml dir, the
+  // one place the sandbox lets Image load from. Cache tiles under it.
+  QString path = QUrl(dirUrl).isLocalFile() ? QUrl(dirUrl).toLocalFile() : dirUrl;
+  while (path.endsWith('/'))
+    path.chop(1);
+  m_tileRoot = path;
+  logEvent("tile root = " + m_tileRoot.toStdString());
+  return QString();
+}
+
+QString PerunAnalyticsBackend::ensureTile(int z, int x, int y) {
+  // Reject anything off the Web-Mercator grid for this zoom (and honour the
+  // OSM zoom cap) — never emit a request that can't be a real tile.
+  if (z < 0 || z > kMaxTileZoom)
+    return QString();
+  const int n = 1 << z;
+  if (x < 0 || x >= n || y < 0 || y >= n)
+    return QString();
+
+  // Cache under the sandbox-readable plugin dir (set by the view); fall back to
+  // the data dir only if the view never called setTileRoot (tiles then unusable
+  // by QML, but the backend still won't error).
+  const QString dir =
+      (m_tileRoot.isEmpty() ? m_dataDir : m_tileRoot) + QStringLiteral("/tiles");
+  const QString path =
+      QStringLiteral("%1/%2_%3_%4.png").arg(dir).arg(z).arg(x).arg(y);
+
+  // Cache hit — serve straight from disk, never hit the network again.
+  const QFileInfo cached(path);
+  if (cached.exists() && cached.size() > 0)
+    return QUrl::fromLocalFile(path).toString();
+
+  if (!QDir().mkpath(dir))
+    return QString();
+
+  if (!m_net)
+    m_net = new QNetworkAccessManager(this);
+
+  const QString url =
+      QStringLiteral("https://tile.openstreetmap.org/%1/%2/%3.png")
+          .arg(z)
+          .arg(x)
+          .arg(y);
+  QNetworkRequest req{QUrl(url)};
+  req.setHeader(QNetworkRequest::UserAgentHeader,
+                QString::fromLatin1(kTileUserAgent));
+  req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                   QNetworkRequest::NoLessSafeRedirectPolicy);
+
+  // Block this backend thread until the tile arrives (or times out). The QML
+  // view runs in a separate process, so the UI stays responsive; the map's
+  // sequential fetch driver keeps at most one request in flight, so no nested
+  // event loops. Tiles are cached, so this cost is paid once per tile.
+  QNetworkReply *reply = m_net->get(req);
+  QEventLoop loop;
+  QTimer timer;
+  timer.setSingleShot(true);
+  QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+  QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+  timer.start(kTileTimeoutMs);
+  loop.exec();
+
+  const bool ok = timer.isActive() && reply->isFinished() &&
+                  reply->error() == QNetworkReply::NoError;
+  const QByteArray data = ok ? reply->readAll() : QByteArray();
+  reply->abort(); // no-op if already finished; cancels a timed-out request
+  reply->deleteLater();
+
+  if (!ok || data.isEmpty()) {
+    logEvent("tile fetch failed " + std::to_string(z) + "/" +
+             std::to_string(x) + "/" + std::to_string(y));
+    return QString(); // offline / error — QML falls back to the plain track
+  }
+
+  // Atomic write: a truncated download must never be cached and served forever.
+  QSaveFile f(path);
+  if (!f.open(QIODevice::WriteOnly))
+    return QString();
+  f.write(data);
+  if (!f.commit())
+    return QString();
+
+  return QUrl::fromLocalFile(path).toString();
 }

@@ -8,6 +8,20 @@ build/
 result
 result-*
 *.lgx
+
+# Local LAN distribution dir: built APK/LGX, the served repo index, and — most
+# importantly — the TLS material from scripts/gen-lan-certs.sh. dist/certs holds
+# CA + server PRIVATE KEYS. This repo is public; none of it may ever be pushed.
+dist/
+
+# Signing / secrets, wherever they land. The release keystore lives OUTSIDE this
+# repo (~/keystores) with its passwords in ~/.gradle/gradle.properties, and must
+# stay there: losing or leaking it means the app can never be updated again.
+*.jks
+*.keystore
+*.p12
+*.key
+*.pem
 # RN / Android
 mobile/android/app/build/
 mobile/android/.gradle/

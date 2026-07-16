@@ -31,6 +31,10 @@ inline QByteArray toGpx(const Track &tr) {
   s += "<trk>";
   if (!tr.name.empty())
     s += "<name>" + detail::xmlEscape(QString::fromStdString(tr.name)) + "</name>";
+  // <type> is the standard GPX activity/category field (schema order: name → …
+  // → type → trkseg). Garmin/Strava read it, so the category survives export.
+  if (!tr.type.empty())
+    s += "<type>" + detail::xmlEscape(QString::fromStdString(tr.type)) + "</type>";
   s += "<trkseg>\n";
   for (const auto &p : tr.points) {
     s += "<trkpt lat=\"" + QString::number(p.lat, 'f', 7) + "\" lon=\"" +
@@ -66,6 +70,8 @@ inline Track fromGpx(const QByteArray &xml) {
         inPt = true;
       } else if (n == QLatin1String("name") && !inPt) {
         tr.name = r.readElementText().toStdString();
+      } else if (n == QLatin1String("type") && !inPt) {
+        tr.type = r.readElementText().toStdString();
       } else if (inPt && n == QLatin1String("ele")) {
         cur.alt = r.readElementText().toDouble();
         tr.hasAlt = true;

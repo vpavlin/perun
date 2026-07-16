@@ -18,6 +18,7 @@ struct GeoPoint {
 struct Track {
   bool hasAlt = false, hasHr = false, hasSpeed = false;
   std::string name;
+  std::string type; // activity category — GPX <trk><type>
   std::vector<GeoPoint> points;
 };
 
