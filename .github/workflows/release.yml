@@ -12,7 +12,11 @@ name: Release LGX
 # vendor/sqlite/aarch64-linux/libsqlite3.so.
 on:
   push:
-    tags: ["v*"]
+    # module-v* only. The mobile app tags mobile-v* and releases a locally-built
+    # (locally-signed) APK — CI has no keystore and must never sign one. A bare
+    # v* would fire this on an app tag and cut an LGX-only release under the
+    # wrong name.
+    tags: ["module-v*"]
   workflow_dispatch:
 
 permissions:
