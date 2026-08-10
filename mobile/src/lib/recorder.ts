@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import * as Location from "expo-location";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
+import { startRunService, stopRunService } from "./keepalive";
 import { GeoPoint, Track, Sport, sportInfo } from "./types";
 import { computeSummary, haversine } from "./analytics";
 
@@ -174,9 +175,12 @@ export async function startRecording(sport: Sport = "running"): Promise<boolean>
   session.begin(sport);
   try {
     fgSub = await Location.watchPositionAsync(RECORDER_OPTIONS, (fix) => session.ingest(fix));
+    // Keep the process (and thus this foreground watch) alive when backgrounded / screen off.
+    await startRunService();
     return true;
   } catch (e) {
     console.log("[perun] watchPositionAsync failed:", e);
+    await stopRunService();
     session.end();
     return false;
   }
@@ -186,6 +190,7 @@ export async function startRecording(sport: Sport = "running"): Promise<boolean>
 export async function stopRecording(): Promise<Track> {
   session.end();
   if (fgSub) { try { fgSub.remove(); } catch { /* ignore */ } fgSub = null; }
+  await stopRunService();
   return session.toTrack();
 }
 

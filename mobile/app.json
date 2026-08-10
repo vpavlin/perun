@@ -2,7 +2,7 @@
   "expo": {
     "name": "Perun",
     "slug": "perun",
-    "version": "1.13.0",
+    "version": "1.14.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -19,7 +19,7 @@
     },
     "android": {
       "package": "co.logos.perun",
-      "versionCode": 15,
+      "versionCode": 16,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
@@ -38,6 +38,7 @@
     "scheme": "perun",
     "plugins": [
       "./plugins/withLogosDelivery",
+      "./plugins/withForegroundService.js",
       "./plugins/withReleaseSigning",
       "expo-sharing",
       [
