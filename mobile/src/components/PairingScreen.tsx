@@ -4,8 +4,9 @@
 // sync from then on is encrypted+topic-scoped to this pairing.
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  View, Text, Pressable, TextInput, ScrollView, StyleSheet, ActivityIndicator, Alert,
+  View, Text, Pressable, TextInput, ScrollView, StyleSheet, ActivityIndicator, Alert, Switch,
 } from "react-native";
+import * as SecureStore from "expo-secure-store";
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-camera";
 import { Identity, secretFromScan } from "../lib/identity";
 import { loadIdentity, saveSecret, clearIdentity } from "../lib/identityStore";
@@ -27,6 +28,12 @@ export function PairingScreen({
   const [error, setError] = useState<string | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const busy = useRef(false); // debounce rapid duplicate barcode callbacks
+
+  // Delivery backend: Perun's own embedded node, or the device-wide Logos Delivery node.
+  // Read at node bring-up (delivery.ts); needs a restart to take effect.
+  const [sharedNode, setSharedNode] = useState(false);
+  useEffect(() => { SecureStore.getItemAsync("perun-shared-node").then((v) => setSharedNode(v === "1")).catch(() => {}); }, []);
+  const setSharedNodePref = (v: boolean) => { setSharedNode(v); SecureStore.setItemAsync("perun-shared-node", v ? "1" : "0").catch(() => {}); };
 
   // Apply a scanned/typed string: parse → persist → show fingerprint.
   const apply = useCallback(
@@ -119,6 +126,24 @@ export function PairingScreen({
         <Text style={styles.h1}>Paired</Text>
         <Text style={styles.body}>Confirm these 3 words match what your Basecamp shows.</Text>
         <Fingerprint words={identity.fingerprint} />
+
+        <View style={styles.nodeCard}>
+          <View style={styles.nodeHeader}>
+            <Text style={styles.nodeLabel}>Shared Logos Delivery node</Text>
+            <Switch
+              value={sharedNode}
+              onValueChange={setSharedNodePref}
+              trackColor={{ true: theme.primary, false: theme.border }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Text style={styles.nodeNote}>
+            {sharedNode
+              ? "Sync runs through the Logos Delivery app's one device-wide node — install it and approve Perun once. Keeps syncing when Perun is backgrounded. Restart Perun to apply."
+              : "Perun runs its own embedded node (default). Restart Perun to apply a change."}
+          </Text>
+        </View>
+
         <Pressable style={styles.primaryBtn} onPress={onClose}>
           <Text style={styles.primaryText}>Done</Text>
         </Pressable>
@@ -205,6 +230,10 @@ const styles = StyleSheet.create({
   ghostBtn: { paddingVertical: 14, alignItems: "center", marginTop: 4 },
   ghostText: { color: theme.primary, fontSize: 15, fontWeight: "600" },
   error: { color: theme.error, fontSize: 14, marginTop: 14, textAlign: "center" },
+  nodeCard: { backgroundColor: theme.card, borderRadius: 12, borderWidth: 1, borderColor: theme.border, padding: 14, marginTop: 20 },
+  nodeHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  nodeLabel: { color: theme.text, fontSize: 15, fontWeight: "600", flex: 1, paddingRight: 10 },
+  nodeNote: { color: theme.textSecondary, fontSize: 13, lineHeight: 18, marginTop: 8 },
   fpBox: {
     flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 10,
     backgroundColor: theme.card, borderRadius: 12, borderWidth: 1, borderColor: theme.border,
