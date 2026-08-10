@@ -1,40 +1,47 @@
-// Native Logos Delivery (embedded Waku node) bridge — the phone runs its OWN
-// liblogosdelivery.so node via the LogosMessaging JNI module and publishes runs
-// on the Perun content topic, where the desktop Basecamp module receives them.
+// Perun's thin adapter over the SHARED logos-transport (mobile/src/lib/logos-transport.ts).
 //
-// The native module is arm64-only (no x86_64 build), so on the emulator
-// `deliveryAvailable()` is true (the JS module is registered) but `ensureNode()`
-// will reject when setup() can't load the .so — callers surface that as an error.
-import { NativeModules, NativeEventEmitter } from "react-native";
-import { fromByteArray } from "base64-js";
+// Perun used to drive its OWN embedded liblogosdelivery node via the LogosMessaging
+// JNI module directly. This routes the SAME sealed-bytes wire through logos-transport
+// instead, which can run either the app's embedded node (RealNode) or the device-wide
+// Logos Delivery SERVICE (ServiceNode) — toggled per user via preferServiceBackend.
+// The wire is unchanged: one derived content topic per pairing, and the whole
+// envelope-JSON sealed (ChaCha20-Poly1305, AAD=topic) with the pairing key. So this
+// swap keeps Perun's proven mobile→Basecamp delivery; it only changes WHICH node
+// carries the bytes. App-specific pieces kept here: the single pair route, the
+// seal/open crypto (identity.ts), and envelope (JSON blob) framing.
 import { loadIdentity } from "./identityStore";
-import { seal, topicFor, Identity } from "./identity";
+import { seal, open, topicFor, Identity } from "./identity";
+import * as transport from "./logos-transport";
+import * as SecureStore from "expo-secure-store";
 
-const { LogosMessaging } = NativeModules as { LogosMessaging: any };
-
-// Every phone/Basecamp pair gets its OWN derived content topic (topicFor(id)),
-// so there is no shared, fixed topic anymore — an unpaired phone has nowhere to
-// publish and MUST NOT fall back to a public plaintext topic. This constant is
-// kept only as documentation of the topic *shape*; live sends use the derived one.
+// Documentation of the topic *shape*; live sends use topicFor(id).
 export const PERUN_TOPIC = "/perun/1/<derived-from-pairing-secret>/proto";
 
-// Time to let the freshly-started node dial logos.dev + form the pubsub mesh
-// before the first publish. Only paid once, on initial node bring-up.
-const SETTLE_MS = 10000;
+/** Error thrown when a sync is attempted before pairing. Surfaced to the user. */
+export const NOT_PAIRED = "Pair with your Basecamp first";
 
-// logos.dev bootstrap peers — the same set the desktop delivery_module dials.
-const BOOTSTRAP = [
-  "/dns4/delivery-01.do-ams3.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAmTUbnxLGT9JvV6mu9oPyDjqHK4Phs1VDJNUgESgNSkuby",
-  "/dns4/delivery-02.do-ams3.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAmMK7PYygBtKUQ8EHp7EfaD3bCEsJrkFooK8RQ2PVpJprH",
-  "/dns4/delivery-01.gc-us-central1-a.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm4S1JYkuzDKLKQvwgAhZKs9otxXqt8SCGtB4hoJP1S397",
-  "/dns4/delivery-02.gc-us-central1-a.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm8Y9kgBNtjxvCnf1X6gnZJW5EGE4UwwCL3CCm55TwqBiH",
-  "/dns4/delivery-01.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm8YokiNun9BkeA1ZRmhLbtNUvcwRr64F69tYj9fkGyuEP",
-  "/dns4/delivery-02.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAkvwhGHKNry6LACrB8TmEFoCJKEX29XR5dDUzk3UT3UNSE",
-];
-
-/** True if the native module is present in this build at all. */
+/** True if a Logos Delivery backend (embedded node or shared service) is present. */
 export function deliveryAvailable(): boolean {
-  return !!LogosMessaging;
+  return transport.deliveryAvailable();
+}
+
+// The single pair route: the phone↔Basecamp pairing identity + its derived topic.
+// An unpaired phone has no route and MUST NOT publish — never a public plaintext topic.
+let route: { id: Identity; topic: string } | null = null;
+
+// Receive listeners (two-way is future; publishing does not require any). adapterReceive
+// opens each candidate with the pairing key and forwards the decoded envelope.
+type MsgCb = (env: unknown) => void;
+let listeners: MsgCb[] = [];
+
+// A stable per-install device id used as the SDS senderId. Generated once, persisted.
+async function getDeviceId(): Promise<string> {
+  let id = await SecureStore.getItemAsync("perun-device-id");
+  if (!id) {
+    id = "perun-" + Math.random().toString(16).slice(2) + Date.now().toString(36);
+    await SecureStore.setItemAsync("perun-device-id", id);
+  }
+  return id;
 }
 
 // UTF-8 encode a string to bytes. Hand-rolled on purpose: no TextEncoder (not
@@ -63,92 +70,101 @@ function utf8Bytes(s: string): Uint8Array {
   return new Uint8Array(out);
 }
 
-// The running node's context handle plus the paired identity + derived topic it
-// was brought up for. Bound together so a send always uses the topic we joined.
-interface Node { ctx: string; id: Identity; topic: string }
-let node: Node | null = null;
-let starting: Promise<Node> | null = null;
-let emitter: NativeEventEmitter | null = null;
-
-/** Error thrown when a sync is attempted before pairing. Surfaced to the user. */
-export const NOT_PAIRED = "Pair with your Basecamp first";
-
-/**
- * Bring the node up once (idempotent): load identity (must be paired) → setup →
- * new(logos.dev) → start → subscribe(derived topic). Concurrent callers share the
- * same in-flight startup. Rejects with NOT_PAIRED if the phone isn't paired.
- */
-export async function ensureNode(onStatus?: (s: string) => void): Promise<string> {
-  if (!LogosMessaging) throw new Error("Logos Delivery native module not present in this build");
-  if (node) return node.ctx;
-  if (starting) return (await starting).ctx;
-  starting = (async () => {
-    const id = await loadIdentity();
-    if (!id) throw new Error(NOT_PAIRED);
-    const topic = topicFor(id);
-    onStatus?.("Starting node…");
-    await LogosMessaging.setup();
-    const config = { mode: "Core", preset: "logos.dev", relay: true, entryNodes: BOOTSTRAP };
-    const c: string = await LogosMessaging.new(config);
-    onStatus?.("Connecting to logos.dev…");
-    await LogosMessaging.start(c);
-    // logosdelivery_subscribe takes the CONTENT topic directly. We subscribe so
-    // the phone can also receive (future two-way); publishing does not require it.
-    await LogosMessaging.relaySubscribe(c, topic);
-    // Give the node time to dial the bootstrap peers and form the pubsub mesh
-    // before the first publish — an immediate send can be dropped with no peers.
-    onStatus?.("Joining mesh…");
-    await new Promise((r) => setTimeout(r, SETTLE_MS));
-    const n: Node = { ctx: c, id, topic };
-    node = n;
-    onStatus?.("Connected");
-    return n;
-  })();
-  try {
-    return (await starting).ctx;
-  } catch (e) {
-    node = null;
-    throw e;
-  } finally {
-    starting = null;
+// UTF-8 decode bytes to a string. Hand-rolled to match utf8Bytes (no TextDecoder).
+function utf8Decode(b: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < b.length; ) {
+    const c = b[i++];
+    if (c < 0x80) {
+      out += String.fromCharCode(c);
+    } else if (c < 0xe0) {
+      out += String.fromCharCode(((c & 0x1f) << 6) | (b[i++] & 0x3f));
+    } else if (c < 0xf0) {
+      out += String.fromCharCode(((c & 0x0f) << 12) | ((b[i++] & 0x3f) << 6) | (b[i++] & 0x3f));
+    } else {
+      const cp = ((c & 0x07) << 18) | ((b[i++] & 0x3f) << 12) | ((b[i++] & 0x3f) << 6) | (b[i++] & 0x3f);
+      const u = cp - 0x10000;
+      out += String.fromCharCode(0xd800 + (u >> 10), 0xdc00 + (u & 0x3ff));
+    }
   }
+  return out;
+}
+
+// Transport hands us the candidate sealed-byte arrays for a content topic; open with
+// the pairing key and forward the decoded envelope. Return true iff a candidate opened
+// (so the transport tallies rxOpened vs rxOpenFail). open() is authenticated — only the
+// right key/candidate wins.
+function adapterReceive(topic: string, candidates: Uint8Array[]): boolean {
+  if (!route) return false;
+  for (const cand of candidates) {
+    let plaintext: Uint8Array;
+    try {
+      plaintext = open(route.id, cand, route.topic);
+    } catch {
+      continue; // wrong key/candidate
+    }
+    try {
+      const env = JSON.parse(utf8Decode(plaintext));
+      listeners.forEach((cb) => cb(env));
+    } catch {
+      /* opened but not a valid envelope */
+    }
+    return true;
+  }
+  return false;
 }
 
 /**
- * Publish one JSON envelope on the pair's derived topic. The whole envelope-JSON
- * is sealed (ChaCha20-Poly1305, AAD=topic) with the pairing key, then base64'd
- * into the liblogosdelivery send message ({contentTopic, payload, ephemeral}).
- * No pairing → no send: we never publish plaintext on a public topic.
+ * Bring the node up once (idempotent): load identity (must be paired) → start the
+ * shared transport on the pair's derived topic. Concurrent callers share the
+ * transport's in-flight startup. Rejects with NOT_PAIRED if the phone isn't paired.
+ * Routes through the device-wide Logos Delivery service when the user enabled it
+ * ("perun-shared-node"), else the app embeds its own node. Returns the node ctx.
+ */
+export async function ensureNode(onStatus?: (s: string) => void): Promise<string> {
+  if (!transport.deliveryAvailable()) throw new Error("Logos Delivery native module not present in this build");
+  if (transport.getCtx()) return transport.getCtx(); // already up
+  const id = await loadIdentity();
+  if (!id) throw new Error(NOT_PAIRED);
+  route = { id, topic: topicFor(id) };
+  const deviceId = await getDeviceId();
+  // Must be set BEFORE the first transport call.
+  try {
+    const shared = (await SecureStore.getItemAsync("perun-shared-node")) === "1";
+    (transport as { preferServiceBackend?: (on: boolean, appId: string) => void }).preferServiceBackend?.(shared, "perun");
+  } catch {
+    /* default to embedded */
+  }
+  await transport.start({ deviceId, topics: [route.topic], onStatus, onReceive: adapterReceive });
+  return transport.getCtx();
+}
+
+/**
+ * Publish one JSON envelope on the pair's derived topic. The whole envelope-JSON is
+ * sealed (ChaCha20-Poly1305, AAD=topic) with the pairing key; the transport does the
+ * channel framing. No pairing → no send: we never publish plaintext on a public topic.
  */
 export async function sendEnvelope(env: object): Promise<void> {
   await ensureNode();
-  const n = node!;
-  const sealed = seal(n.id, utf8Bytes(JSON.stringify(env)), n.topic);
-  const messageJson = JSON.stringify({
-    contentTopic: n.topic,
-    payload: fromByteArray(sealed),
-    ephemeral: false,
-  });
-  await LogosMessaging.send(n.ctx, messageJson);
+  const r = route!;
+  const sealed = seal(r.id, utf8Bytes(JSON.stringify(env)), r.topic);
+  await transport.publishSealed(r.topic, sealed);
 }
 
 /** Subscribe to incoming Delivery messages (returns an unsubscribe fn). */
-export function onMessage(cb: (evt: { wakuPtr: string; event: string }) => void): () => void {
-  if (!LogosMessaging) return () => {};
-  if (!emitter) emitter = new NativeEventEmitter(LogosMessaging);
-  const sub = emitter.addListener("logosMessage", cb);
-  return () => sub.remove();
+export function onMessage(cb: (env: unknown) => void): () => void {
+  listeners.push(cb);
+  return () => {
+    listeners = listeners.filter((x) => x !== cb);
+  };
 }
 
 /** Stop the node (best-effort). */
 export async function stopNode(): Promise<void> {
-  if (node && LogosMessaging) {
-    const c = node.ctx;
-    node = null;
-    try {
-      await LogosMessaging.stop(c);
-    } catch {
-      /* ignore */
-    }
+  route = null;
+  try {
+    await transport.stop();
+  } catch {
+    /* ignore */
   }
 }
