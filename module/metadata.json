@@ -1,24 +1,35 @@
 {
   "name": "perun_analytics",
   "display_name": "Perun Analytics",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "ui_qml",
   "interface": "universal",
   "category": "fitness",
-  "description": "Detailed running analytics for Perun — ingests runs synced over Logos Delivery and shows splits, elevation, pace and trends.",
+  "description": "Detailed running analytics for Perun \u2014 ingests runs synced over Logos Delivery and shows splits, elevation, pace and trends.",
   "main": "perun_analytics_plugin",
   "icon": "qml/icons/icon.png",
   "view": "qml/Main.qml",
-  "dependencies": ["delivery_module"],
-  "codegen": { "rep": "src/perun_analytics.rep" },
-
+  "dependencies": [
+    "delivery_module"
+  ],
+  "codegen": {
+    "rep": "src/perun_analytics.rep"
+  },
   "nix": {
     "packages": {
-      "build": ["zlib", "openssl"],
-      "runtime": ["openssl"]
+      "build": [
+        "zlib",
+        "openssl"
+      ],
+      "runtime": [
+        "openssl"
+      ]
     },
     "external_libraries": [
-      { "name": "sqlite3", "vendor_path": "vendor/sqlite" }
+      {
+        "name": "sqlite3",
+        "vendor_path": "vendor/sqlite"
+      }
     ],
     "cmake": {
       "find_packages": [],

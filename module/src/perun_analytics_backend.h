@@ -58,6 +58,9 @@ private:
 
   // Split gzipped GPX into encrypted CHUNK messages, sent on the derived topic.
   QString sendChunks(const QString &runId, int rev, const QByteArray &gz);
+  // Recover a sealed CHUNK envelope (relay or SDS-channel wire, any base64
+  // depth), reassemble and ingest.
+  void ingestSealed(const QByteArray &raw);
   // Reassembled/own gzipped GPX → parse, analyse, persist (at revision rev).
   void ingestGzTrack(const QString &runId, int rev, const QByteArray &gz);
   QJsonObject runToJson(const QString &runId, int rev, const perun::Track &tr) const;

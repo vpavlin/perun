@@ -148,6 +148,58 @@ void PerunAnalyticsBackend::openStoreAndLoad() {
     publishRuns();
 }
 
+// Recover + dispatch one sealed CHUNK envelope, regardless of transport or
+// base64 depth: the SDS reliable-channel wire (phone logos-transport real-node)
+// is DOUBLE-base64, legacy plain relay is single. Try the payload raw, single-,
+// and double-base64-decoded; the first that authenticates with our pairing key
+// wins. Payload is nonce(12) + ChaCha20-Poly1305(env, aad=topic); a bad tag =
+// not ours / tampered / wrong candidate -> skip.
+void PerunAnalyticsBackend::ingestSealed(const QByteArray &raw) {
+  const QByteArray d1 = QByteArray::fromBase64(raw);
+  const QByteArray d2 = QByteArray::fromBase64(d1);
+  for (const QByteArray &cand : {raw, d1, d2}) {
+    if (cand.isEmpty())
+      continue;
+    bool ok = false;
+    const perun::Bytes pt =
+        perun::open(m_id, toBytes(cand), m_topic.toStdString(), &ok);
+    if (!ok)
+      continue;
+    QJsonParseError err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(fromBytes(pt), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject())
+      return;
+    const QJsonObject env = doc.object();
+    if (env.value(QStringLiteral("type")).toString() != QLatin1String("CHUNK"))
+      return;
+
+    const QString id = env.value(QStringLiteral("id")).toString();
+    const int rev = env.value(QStringLiteral("rev")).toInt(1);
+    const int seq = env.value(QStringLiteral("seq")).toInt();
+    const int total = env.value(QStringLiteral("total")).toInt();
+    const QByteArray part = QByteArray::fromBase64(
+        env.value(QStringLiteral("gz")).toString().toLatin1());
+
+    // Key reassembly by id+rev so an edit arriving mid-transfer of an older
+    // revision never splices chunks from two revisions into one gzip stream.
+    const QString key = id + QStringLiteral("@") + QString::number(rev);
+    ChunkBuf &buf = m_chunks[key];
+    buf.total = total;
+    buf.parts.insert(seq, part);
+    if (buf.parts.size() < total)
+      return;
+
+    QByteArray gz;
+    for (int i = 0; i < total; ++i)
+      gz += buf.parts.value(i);
+    m_chunks.remove(key);
+    logEvent("reassembled " + std::to_string(total) + " chunk(s) for " +
+             id.toStdString() + " rev " + std::to_string(rev));
+    ingestGzTrack(id, rev, gz);
+    return;
+  }
+}
+
 void PerunAnalyticsBackend::bootstrap() {
   modules().delivery_module.on(
       "connectionStateChanged", [this](const QVariantList &data) {
@@ -155,54 +207,31 @@ void PerunAnalyticsBackend::bootstrap() {
           setStatus(data.at(0).toString());
       });
 
-  modules().delivery_module.on(
-      "messageReceived", [this](const QVariantList &data) {
-        if (data.size() < 3)
-          return;
-        // Payload on the wire is nonce(12)‖ChaCha20-Poly1305(env, aad=topic).
-        // Decrypt with our pairing key; a bad tag = not ours / tampered → drop.
-        bool ok = false;
-        const perun::Bytes pt =
-            perun::open(m_id, toBytes(data.at(2).toByteArray()),
-                        m_topic.toStdString(), &ok);
-        if (!ok)
-          return;
-        QJsonParseError err{};
-        const QJsonDocument doc = QJsonDocument::fromJson(fromBytes(pt), &err);
-        if (err.error != QJsonParseError::NoError || !doc.isObject())
-          return;
-        const QJsonObject env = doc.object();
-        if (env.value(QStringLiteral("type")).toString() !=
-            QLatin1String("CHUNK"))
-          return;
+  // Both legacy plain relay AND SDS reliable-channel receive route through the
+  // same handler; the phone (logos-transport) sends over channels.
+  auto onSealed = [this](const QVariantList &data) {
+    if (data.size() >= 3)
+      ingestSealed(data.at(2).toByteArray());
+  };
+  modules().delivery_module.on("messageReceived", onSealed);
+  modules().delivery_module.on("channelMessageReceived", onSealed);
 
-        const QString id = env.value(QStringLiteral("id")).toString();
-        const int rev = env.value(QStringLiteral("rev")).toInt(1); // v1 senders had none
-        const int seq = env.value(QStringLiteral("seq")).toInt();
-        const int total = env.value(QStringLiteral("total")).toInt();
-        const QByteArray part = QByteArray::fromBase64(
-            env.value(QStringLiteral("gz")).toString().toLatin1());
-
-        // Key reassembly by id+rev so an edit arriving mid-transfer of an older
-        // revision never splices chunks from two revisions into one gzip stream.
-        const QString key = id + QStringLiteral("@") + QString::number(rev);
-        ChunkBuf &buf = m_chunks[key];
-        buf.total = total;
-        buf.parts.insert(seq, part);
-        if (buf.parts.size() < total)
-          return;
-
-        QByteArray gz;
-        for (int i = 0; i < total; ++i)
-          gz += buf.parts.value(i);
-        m_chunks.remove(key);
-        logEvent("reassembled " + std::to_string(total) + " chunk(s) for " +
-                 id.toStdString() + " rev " + std::to_string(rev));
-        ingestGzTrack(id, rev, gz);
-      });
-
-  const QJsonObject cfg{
-      {"logLevel", "INFO"}, {"mode", "Core"}, {"preset", "logos.dev"}};
+  // FLEET = logos.test (cluster 2). logos.dev migrated to cluster 3 and breaks
+  // fresh joins, so both the phone and this node pin the logos.test entryNodes
+  // (same set kym/qaku use) or they never mesh.
+  const QJsonArray entryNodes{
+      "/dns4/node-01.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmQ9X2xDfPG3uL77V9piYDhjq14JhKCtcmNYsTMKNqrKCj",
+      "/dns4/node-02.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmB8NYprrfQrgWVzsJtYWkfjsXbmJEGNMG6othXsQ53BwG",
+      "/dns4/node-01.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmF8WtwGPmeGHgYAX2277jHgy5cW9F7zsB8EqUjBZQAZQ3",
+      "/dns4/node-02.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmUuXhUW9bdJpzN1kfDziFiUZo4bszTk66cvr7uuyCHXR7",
+      "/dns4/node-01.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmL3oU95jh1BZHozn3uNhx8HEneirgr8M1jEAapzXGDqRF",
+      "/dns4/node-02.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAm28CoBZjpyxsanC8tQpbvZ7bZJnVYuB1EgFzb571qpWsV",
+  };
+  const QJsonObject cfg{{"logLevel", "INFO"},
+                        {"mode", "Core"},
+                        {"preset", "logos.test"},
+                        {"relay", true},
+                        {"entryNodes", entryNodes}};
   const QString cfgJson =
       QString::fromUtf8(QJsonDocument(cfg).toJson(QJsonDocument::Compact));
 
@@ -221,6 +250,10 @@ void PerunAnalyticsBackend::bootstrap() {
     setStatus(QStringLiteral("subscribe failed: %1").arg(sub.getError()));
     return;
   }
+  // Open the SDS reliable channel on the same topic (channelId == contentTopic)
+  // so we receive the phone's channel-framed CHUNKs and can channelSend back.
+  modules().delivery_module.channelCreate(m_topic, m_topic,
+                                          QStringLiteral("perun-desktop"));
 
   m_nodeReady = true;
   setReady(true);
@@ -269,7 +302,10 @@ QString PerunAnalyticsBackend::sendChunks(const QString &runId, int rev,
     const QByteArray sealed = fromBytes(perun::seal(
         m_id, toBytes(QJsonDocument(env).toJson(QJsonDocument::Compact)),
         m_topic.toStdString()));
-    LogosResult r = modules().delivery_module.send(m_topic, sealed);
+    // channelSend to match the phone's SDS reliable-channel wire: pass
+    // base64(sealed); the delivery FFI base64s once more (double-base64).
+    LogosResult r =
+        modules().delivery_module.channelSend(m_topic, sealed.toBase64());
     if (!r.success) {
       logEvent("send chunk failed: " + r.getError().toStdString());
       return r.getError();
@@ -426,6 +462,8 @@ QString PerunAnalyticsBackend::resetPairing() {
     LogosResult sub = modules().delivery_module.subscribe(m_topic);
     if (!sub.success)
       return sub.getError();
+    modules().delivery_module.channelCreate(m_topic, m_topic,
+                                            QStringLiteral("perun-desktop"));
   }
   logEvent("pairing reset — old phones unpaired");
   return QString();
