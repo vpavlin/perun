@@ -35,8 +35,20 @@ const OPTIONS = {
   foregroundServiceType: ["location"],
 };
 
+// TEMPORARILY DISABLED — starting a type="location" foreground service NATIVELY
+// crashes on run start (Android 16 / targetSdk 36; the crash bypasses the try/catch
+// below because it's thrown in native startForeground, not JS). The 4.0.1 downgrade
+// (matching qaku, which uses a dataSync FGS) did NOT fix it, so it's the LOCATION FGS
+// type on Android 16, not the library version. Until that's solved, record
+// FOREGROUND-ONLY (watchPositionAsync keeps delivering while the app is visible) so a
+// run at least starts. Re-enable by flipping this flag once the location FGS is fixed
+// (candidate: a bespoke Kotlin location FGS, or dataSync with the background-location
+// trade-off).
+const FGS_ENABLED = false;
+
 /** Start the recording foreground service (best-effort; no throw). */
 export async function startRunService(): Promise<void> {
+  if (!FGS_ENABLED) return; // foreground-only recording — see note above
   try {
     if (!BackgroundService.isRunning()) {
       await BackgroundService.start(task, OPTIONS as Parameters<typeof BackgroundService.start>[1]);

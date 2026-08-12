@@ -2,7 +2,7 @@
   "expo": {
     "name": "Perun",
     "slug": "perun",
-    "version": "1.15.1",
+    "version": "1.15.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -19,7 +19,7 @@
     },
     "android": {
       "package": "co.logos.perun",
-      "versionCode": 18,
+      "versionCode": 19,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
@@ -51,7 +51,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Perun scans the pairing QR shown by your Basecamp."
+          "cameraPermission": "Perun scans the pairing QR shown by your Basecamp.",
+          "recordAudioAndroid": false
         }
       ],
       "./src/lib/logos-transport-pkg/plugins/withDeliveryClient.js"
