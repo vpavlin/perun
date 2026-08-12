@@ -239,9 +239,9 @@ export default function App() {
             </>
           )}
         </View>
-        {hasAlt && liveSummary.elevGainM > 0 && (
+        {hasAlt && (
           <>
-            <Text style={styles.sectionLabel}>ELEVATION</Text>
+            <Text style={styles.sectionLabel}>ELEVATION · +{fmtElev(liveSummary.elevGainM)}</Text>
             <View style={[styles.mapBox, { width: W_, height: 110, marginHorizontal: 16 }]}>
               <ElevationChart points={rec.points} width={W_} height={110} />
             </View>
@@ -491,9 +491,9 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
         <Text style={styles.mapToggleText}>{hideMap ? "◻ Show map" : "◼ Hide map (privacy)"}</Text>
       </Pressable>
 
-      {run.summary.elevGainM > 0 && (
+      {run.track.points.some((p) => p.alt != null) && (
         <>
-          <Text style={styles.sectionLabel}>ELEVATION</Text>
+          <Text style={styles.sectionLabel}>ELEVATION · +{fmtElev(run.summary.elevGainM)}</Text>
           <View style={[styles.mapBox, { width: w, height: 120 }]}>
             <ElevationChart points={run.track.points} width={w} height={120} />
           </View>

@@ -11,14 +11,23 @@ import { theme } from "../theme";
 
 export function ElevationChart({ points, width, height }: { points: GeoPoint[]; width: number; height: number }) {
   // (cumulativeDistanceM, altM) series, skipping points with no altitude fix.
-  const series: { d: number; a: number }[] = [];
+  const raw: { d: number; a: number }[] = [];
   let dist = 0;
   for (let i = 0; i < points.length; i++) {
     if (i > 0 && !points[i].brk) {
       dist += haversine(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon);
     }
-    if (points[i].alt != null && Number.isFinite(points[i].alt)) series.push({ d: dist, a: points[i].alt! });
+    if (points[i].alt != null && Number.isFinite(points[i].alt)) raw.push({ d: dist, a: points[i].alt! });
   }
+
+  // Light centred moving average — raw GPS altitude is jittery enough that the
+  // unsmoothed trace reads as noise rather than terrain.
+  const WIN = 2; // ±2 samples
+  const series = raw.map((pt, i) => {
+    let sum = 0, n = 0;
+    for (let j = Math.max(0, i - WIN); j <= Math.min(raw.length - 1, i + WIN); j++) { sum += raw[j].a; n++; }
+    return { d: pt.d, a: sum / n };
+  });
 
   if (series.length < 2) {
     return (

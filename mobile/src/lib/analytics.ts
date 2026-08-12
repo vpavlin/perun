@@ -15,6 +15,31 @@ export function haversine(lat1: number, lon1: number, lat2: number, lon2: number
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
+// GPS/barometric altitude is noisy AND intermittent (a fix can arrive with no
+// vertical component, so p.alt is undefined on some points). The old code did
+// `(alt ?? 0) - (prevAlt ?? 0)`, which turned every missing-altitude gap into a
+// phantom ±100 m swing and summed raw jitter on top — elevation gain came out
+// wildly too high. This accumulator fixes both: it ignores samples with no
+// altitude entirely, and only commits a rise once it clears a noise threshold
+// measured from the last local trough (the standard way to score GPS ascent).
+const ELEV_THRESHOLD_M = 5;
+function makeElevAccumulator() {
+  let ref: number | null = null; // last committed peak / running trough
+  return {
+    reset() { ref = null; }, // call across a break so a pause isn't bridged
+    // Feed one sample; returns the metres of ascent to credit (0 unless a
+    // sustained climb just cleared the threshold).
+    add(alt: number | undefined): number {
+      if (alt == null || !Number.isFinite(alt)) return 0;
+      if (ref == null) { ref = alt; return 0; }
+      const d = alt - ref;
+      if (d >= ELEV_THRESHOLD_M) { ref = alt; return d; } // committed climb
+      if (alt < ref) ref = alt; // new low — measure the next climb from here
+      return 0;
+    },
+  };
+}
+
 export function computeSummary(tr: Track): RunSummary {
   const p = tr.points;
   const s: RunSummary = {
@@ -24,6 +49,8 @@ export function computeSummary(tr: Track): RunSummary {
   if (p.length < 2) return s;
   let hrSum = 0, hrN = 0;
   let movingMs = 0;
+  const elev = makeElevAccumulator();
+  if (tr.hasAlt) elev.add(p[0].alt); // seed the trough from the first fix
   for (let i = 1; i < p.length; i++) {
     // A break means the pair (i-1, i) spans a pause: no distance was covered
     // *by the activity*, and the wall time in between isn't moving time.
@@ -31,10 +58,9 @@ export function computeSummary(tr: Track): RunSummary {
     if (!p[i].brk) {
       s.distanceM += haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
       movingMs += p[i].t - p[i - 1].t;
-      if (tr.hasAlt) {
-        const d = (p[i].alt ?? 0) - (p[i - 1].alt ?? 0);
-        if (d > 0) s.elevGainM += d;
-      }
+      if (tr.hasAlt) s.elevGainM += elev.add(p[i].alt);
+    } else if (tr.hasAlt) {
+      elev.reset(); // don't bridge an ascent across a pause/teleport
     }
     if (tr.hasHr) { hrSum += p[i].hr ?? 0; hrN++; }
   }
@@ -55,6 +81,10 @@ export function computeSplits(tr: Track, splitMeters = 1000): Split[] {
   // Accumulate moving time so a pause mid-kilometre doesn't inflate that split's
   // pace (elapsed time would make a coffee stop look like a collapse).
   let splitMs = 0;
+  // One accumulator for the whole track (so the trough reference carries across
+  // km boundaries); committed ascent lands in whichever split it happened in.
+  const elev = makeElevAccumulator();
+  if (tr.hasAlt) elev.add(p[0].alt);
   const close = () => {
     const dur = splitMs / 1000;
     splits.push({
@@ -70,10 +100,9 @@ export function computeSplits(tr: Track, splitMeters = 1000): Split[] {
     if (!p[i].brk) {
       splitDist += haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
       splitMs += p[i].t - p[i - 1].t;
-      if (tr.hasAlt) {
-        const d = (p[i].alt ?? 0) - (p[i - 1].alt ?? 0);
-        if (d > 0) splitElev += d;
-      }
+      if (tr.hasAlt) splitElev += elev.add(p[i].alt);
+    } else if (tr.hasAlt) {
+      elev.reset();
     }
     if (tr.hasHr) { hrSum += p[i].hr ?? 0; hrN++; }
     if (splitDist >= splitMeters) {

@@ -78,7 +78,10 @@ export function RouteMap({
   return (
     <View>
       <Svg width={width} height={height}>
-        {layout.tiles.map((t) =>
+        {/* Gate on hideBasemap, not just on `uris`: once tiles are fetched they
+            stay cached in `uris`, so toggling hide AFTER they loaded would keep
+            drawing them. This is what makes "Hide map" actually hide it. */}
+        {!hideBasemap && layout.tiles.map((t) =>
           uris[t.id] ? (
             <SvgImage
               key={t.key}
