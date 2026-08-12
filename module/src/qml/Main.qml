@@ -16,6 +16,9 @@ Item {
     readonly property var runs: backend ? JSON.parse(backend.runsJson || "[]") : []
     property int selectedIndex: 0
     readonly property var selectedRun: (runs.length > 0 && selectedIndex >= 0 && selectedIndex < runs.length) ? runs[selectedIndex] : null
+    // Trends dashboard vs single-run detail. The right pane shows aggregate
+    // trends across all runs when this is on.
+    property bool showTrends: false
 
     // Decoded points for the selected run's route map (fetched on demand).
     property var trackPoints: []
@@ -79,8 +82,8 @@ Item {
     function fetchTrack() {
         if (!backend || !selectedRun) { root.trackPoints = []; return; }
         logos.watch(backend.trackJson(selectedRun.id),
-                    function (json) { root.trackPoints = JSON.parse(json || "[]"); mapCanvas.requestPaint(); },
-                    function (e) { root.trackPoints = []; mapCanvas.requestPaint(); });
+                    function (json) { root.trackPoints = JSON.parse(json || "[]"); },
+                    function (e) { root.trackPoints = []; });
     }
 
     // ---- formatting helpers ----
@@ -97,6 +100,68 @@ Item {
         return h > 0 ? (h + ":" + mm + ":" + ss) : (m + ":" + ss);
     }
     function fmtElev(m) { return Math.round(m || 0) + " m"; }
+
+    // Haversine metres — same as mobile analytics; drives the elevation chart's
+    // cumulative-distance x-axis.
+    function haversine(lat1, lon1, lat2, lon2) {
+        var R = 6371000, D2R = Math.PI / 180;
+        var dLat = (lat2 - lat1) * D2R, dLon = (lon2 - lon1) * D2R;
+        var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * D2R) * Math.cos(lat2 * D2R) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+    }
+
+    // ---- trends / aggregates (all computed from root.runs) ----
+    // Local Monday 00:00 of the week containing ts (DST-safe via the Date API).
+    function weekStartMs(ts) {
+        var d = new Date(ts || 0);
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // getDay Sun=0 → Mon=0
+        return d.getTime();
+    }
+    function trendTotals() {
+        var t = { runs: 0, dist: 0, dur: 0, elev: 0 };
+        var rs = root.runs;
+        for (var i = 0; i < rs.length; i++) {
+            var s = rs[i].summary; if (!s) continue;
+            t.runs++; t.dist += s.distanceM || 0; t.dur += s.durationS || 0; t.elev += s.elevGainM || 0;
+        }
+        return t;
+    }
+    // Oldest→newest array of { label, dist } for the last nWeeks weeks.
+    function weeklyBars(nWeeks) {
+        var keys = [], cur = weekStartMs((new Date()).getTime());
+        for (var i = 0; i < nWeeks; i++) {
+            keys.push(cur);
+            var pd = new Date(cur); pd.setDate(pd.getDate() - 7); cur = weekStartMs(pd.getTime());
+        }
+        var buckets = {};
+        for (var i = 0; i < keys.length; i++) buckets[keys[i]] = 0;
+        var rs = root.runs;
+        for (var i = 0; i < rs.length; i++) {
+            var s = rs[i].summary; if (!s) continue;
+            var w = weekStartMs(rs[i].startTs);
+            if (w in buckets) buckets[w] += (s.distanceM || 0);
+        }
+        keys.reverse();
+        var out = [];
+        for (var i = 0; i < keys.length; i++) {
+            var d = new Date(keys[i]);
+            out.push({ label: (d.getMonth() + 1) + "/" + d.getDate(), dist: buckets[keys[i]] || 0 });
+        }
+        return out;
+    }
+    function personalBests() {
+        var rs = root.runs, longest = null, climb = null, fastest = null;
+        for (var i = 0; i < rs.length; i++) {
+            var s = rs[i].summary; if (!s) continue;
+            if (!longest || s.distanceM > longest.summary.distanceM) longest = rs[i];
+            if (!climb || s.elevGainM > climb.summary.elevGainM) climb = rs[i];
+            if (root.sportInfo(rs[i].sport).foot && s.avgPaceSecPerKm > 0 &&
+                (!fastest || s.avgPaceSecPerKm < fastest.summary.avgPaceSecPerKm)) fastest = rs[i];
+        }
+        return { longest: longest, climb: climb, fastest: fastest };
+    }
 
     // Sport table — mirrors SPORTS in mobile/src/lib/types.ts and isKnownSport()
     // in src/geo.h. `foot` decides pace-vs-speed: min/km is a runner's unit and
@@ -170,10 +235,33 @@ Item {
             border.color: Theme.palette.borderHairline
             border.width: 1
 
-            ListView {
-                id: runList
+            ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: Theme.spacing.small
+                spacing: Theme.spacing.small
+
+                // Trends toggle — flips the right pane to the aggregate dashboard.
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 38
+                    radius: Theme.spacing.radiusSmall
+                    color: root.showTrends ? Theme.palette.overlayOrange : Theme.palette.backgroundSecondary
+                    border.width: root.showTrends ? 1 : 0
+                    border.color: Theme.palette.primary
+                    MouseArea { anchors.fill: parent; onClicked: root.showTrends = !root.showTrends }
+                    LogosText {
+                        anchors.centerIn: parent
+                        text: root.showTrends ? "‹ Back to runs" : "📊  Trends & totals"
+                        color: root.showTrends ? Theme.palette.primary : Theme.palette.textSecondary
+                        font.pixelSize: 14
+                        font.weight: Theme.typography.weightMedium
+                    }
+                }
+
+                ListView {
+                id: runList
+                Layout.fillWidth: true
+                Layout.fillHeight: true
                 clip: true
                 spacing: Theme.spacing.small
                 model: root.runs
@@ -185,7 +273,7 @@ Item {
                     color: index === root.selectedIndex ? Theme.palette.overlayOrange : Theme.palette.backgroundSecondary
                     border.width: index === root.selectedIndex ? 1 : 0
                     border.color: Theme.palette.primary
-                    MouseArea { anchors.fill: parent; onClicked: root.selectedIndex = index }
+                    MouseArea { anchors.fill: parent; onClicked: { root.selectedIndex = index; root.showTrends = false } }
                     RowLayout {
                         anchors.fill: parent
                         anchors.margins: Theme.spacing.medium
@@ -225,6 +313,7 @@ Item {
                     text: "No runs yet"
                     color: Theme.palette.textTertiary; font.pixelSize: 14
                 }
+                }
             }
         }
 
@@ -241,7 +330,7 @@ Item {
                 anchors.fill: parent
                 anchors.margins: Theme.spacing.medium
                 spacing: Theme.spacing.small
-                visible: root.selectedRun !== null
+                visible: root.selectedRun !== null && !root.showTrends
 
                 // Summary tiles
                 RowLayout {
@@ -499,6 +588,91 @@ Item {
                     }
                 }
 
+                // ---- Elevation profile — altitude over cumulative distance,
+                //      matching the mobile ElevationChart (skips no-fix points,
+                //      light moving-average smoothing). ----
+                LogosText {
+                    visible: elevBox.hasData
+                    text: "ELEVATION" + (root.selectedRun ? "  ·  +" + root.fmtElev(root.selectedRun.summary.elevGainM) : "")
+                    color: Theme.palette.textTertiary; font.pixelSize: 11
+                    Layout.topMargin: Theme.spacing.small
+                }
+                Rectangle {
+                    id: elevBox
+                    visible: hasData
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 110
+                    radius: Theme.spacing.radiusSmall
+                    color: Theme.palette.backgroundElevated
+                    border.color: Theme.palette.borderHairline
+                    border.width: 1
+                    clip: true
+                    // True when the selected run has at least one real altitude
+                    // sample (re-evaluates when trackPoints changes).
+                    property bool hasData: {
+                        var pts = root.trackPoints || [];
+                        for (var i = 0; i < pts.length; i++) if (pts[i].altValid) return true;
+                        return false;
+                    }
+                    onWidthChanged: elevCanvas.requestPaint()
+                    onHasDataChanged: elevCanvas.requestPaint()
+                    // Repaint when a different run's track loads (the map uses the
+                    // same pattern; hasData alone wouldn't fire run-to-run).
+                    Connections { target: root; function onTrackPointsChanged() { elevCanvas.requestPaint(); } }
+                    Canvas {
+                        id: elevCanvas
+                        anchors.fill: parent
+                        anchors.margins: 4
+                        onPaint: {
+                            var ctx = getContext("2d");
+                            ctx.reset();
+                            var Wd = width, Hd = height;
+                            var pts = root.trackPoints || [];
+                            var raw = [], dist = 0;
+                            for (var i = 0; i < pts.length; i++) {
+                                if (i > 0 && !pts[i].brk)
+                                    dist += root.haversine(pts[i-1].lat, pts[i-1].lon, pts[i].lat, pts[i].lon);
+                                if (pts[i].altValid) raw.push({ d: dist, a: pts[i].alt });
+                            }
+                            if (raw.length < 2) return;
+                            // light centred moving average (±2 samples)
+                            var series = [];
+                            for (var i = 0; i < raw.length; i++) {
+                                var sum = 0, n = 0;
+                                for (var j = Math.max(0, i-2); j <= Math.min(raw.length-1, i+2); j++) { sum += raw[j].a; n++; }
+                                series.push({ d: raw[i].d, a: sum / n });
+                            }
+                            var minA = series[0].a, maxA = series[0].a, maxD = series[series.length-1].d;
+                            for (var i = 0; i < series.length; i++) {
+                                if (series[i].a < minA) minA = series[i].a;
+                                if (series[i].a > maxA) maxA = series[i].a;
+                            }
+                            var spanA = Math.max(1, maxA - minA); maxD = Math.max(1, maxD);
+                            var pad = 6;
+                            function X(d) { return pad + (d / maxD) * (Wd - 2*pad); }
+                            function Y(a) { return Hd - pad - ((a - minA) / spanA) * (Hd - 2*pad); }
+                            ctx.strokeStyle = Theme.palette.borderHairline; ctx.lineWidth = 1;
+                            ctx.beginPath(); ctx.moveTo(pad, Hd - pad); ctx.lineTo(Wd - pad, Hd - pad); ctx.stroke();
+                            ctx.beginPath(); ctx.moveTo(X(0), Hd - pad);
+                            for (var i = 0; i < series.length; i++) ctx.lineTo(X(series[i].d), Y(series[i].a));
+                            ctx.lineTo(X(maxD), Hd - pad); ctx.closePath();
+                            ctx.globalAlpha = 0.13; ctx.fillStyle = Theme.palette.primary; ctx.fill(); ctx.globalAlpha = 1.0;
+                            ctx.beginPath();
+                            for (var i = 0; i < series.length; i++) {
+                                var x = X(series[i].d), y = Y(series[i].a);
+                                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                            }
+                            ctx.strokeStyle = Theme.palette.primary; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.stroke();
+                            ctx.fillStyle = Theme.palette.textTertiary; ctx.font = "10px sans-serif";
+                            ctx.textAlign = "right";
+                            ctx.fillText(Math.round(maxA) + " m", Wd - pad, 11);
+                            ctx.fillText(Math.round(minA) + " m", Wd - pad, Hd - pad - 3);
+                            ctx.textAlign = "left";
+                            ctx.fillText("+" + Math.round(maxA - minA) + " m", pad, Hd - pad - 3);
+                        }
+                    }
+                }
+
                 // Splits header
                 RowLayout {
                     Layout.fillWidth: true
@@ -545,10 +719,118 @@ Item {
 
             LogosText {
                 anchors.centerIn: parent
-                visible: root.selectedRun === null
+                visible: root.selectedRun === null && !root.showTrends
                 text: "Select a run to see its details"
                 color: Theme.palette.textTertiary
                 font.pixelSize: 14
+            }
+
+            // ---- Trends dashboard: all-time totals, weekly distance bars, and
+            //      personal bests — aggregated across every run. ----
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Theme.spacing.medium
+                spacing: Theme.spacing.medium
+                visible: root.showTrends
+
+                LogosText { text: "Trends"; color: Theme.palette.text; font.pixelSize: 20; font.weight: Theme.typography.weightMedium }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing.large
+                    Repeater {
+                        model: {
+                            var t = root.trendTotals();
+                            var hrs = t.dur / 3600;
+                            return [
+                                { k: "Runs", v: "" + t.runs },
+                                { k: "Distance", v: (t.dist / 1000).toFixed(1) + " km" },
+                                { k: "Time", v: (hrs >= 1 ? hrs.toFixed(1) + " h" : Math.round(t.dur / 60) + " min") },
+                                { k: "Elevation", v: Math.round(t.elev) + " m" }
+                            ];
+                        }
+                        delegate: ColumnLayout {
+                            spacing: 2
+                            LogosText { text: modelData.k; color: Theme.palette.textTertiary; font.pixelSize: 11 }
+                            LogosText { text: modelData.v; color: Theme.palette.text; font.pixelSize: 20; font.weight: Theme.typography.weightMedium }
+                        }
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.palette.borderHairline }
+
+                LogosText { text: "WEEKLY DISTANCE  ·  last 12 weeks (km)"; color: Theme.palette.textTertiary; font.pixelSize: 11 }
+                Rectangle {
+                    id: weekBox
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 170
+                    radius: Theme.spacing.radiusSmall
+                    color: Theme.palette.backgroundElevated
+                    border.color: Theme.palette.borderHairline
+                    border.width: 1
+                    clip: true
+                    property var bars: root.showTrends ? root.weeklyBars(12) : []
+                    onBarsChanged: weekCanvas.requestPaint()
+                    onWidthChanged: weekCanvas.requestPaint()
+                    Canvas {
+                        id: weekCanvas
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        onPaint: {
+                            var ctx = getContext("2d"); ctx.reset();
+                            var Wd = width, Hd = height;
+                            var bars = weekBox.bars || [];
+                            if (bars.length === 0) return;
+                            var maxV = 0;
+                            for (var i = 0; i < bars.length; i++) if (bars[i].dist > maxV) maxV = bars[i].dist;
+                            var labelH = 14, topPad = 14, chartH = Hd - labelH - topPad;
+                            var gap = 6, bw = (Wd - gap * (bars.length - 1)) / bars.length;
+                            ctx.font = "9px sans-serif"; ctx.textAlign = "center";
+                            for (var i = 0; i < bars.length; i++) {
+                                var x = i * (bw + gap);
+                                var h = maxV > 0 ? (bars[i].dist / maxV) * chartH : 0;
+                                var y = topPad + (chartH - h);
+                                ctx.fillStyle = Theme.palette.primary;
+                                ctx.globalAlpha = bars[i].dist > 0 ? 1.0 : 0.22;
+                                ctx.fillRect(x, y, bw, Math.max(bars[i].dist > 0 ? 2 : 1, h));
+                                ctx.globalAlpha = 1.0;
+                                if (bars[i].dist > 0) {
+                                    ctx.fillStyle = Theme.palette.textSecondary;
+                                    ctx.fillText((bars[i].dist / 1000).toFixed(0), x + bw / 2, y - 3);
+                                }
+                                ctx.fillStyle = Theme.palette.textTertiary;
+                                if (i % 2 === (bars.length % 2)) ctx.fillText(bars[i].label, x + bw / 2, Hd - 3);
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.palette.borderHairline }
+
+                LogosText { text: "PERSONAL BESTS"; color: Theme.palette.textTertiary; font.pixelSize: 11 }
+                Repeater {
+                    model: {
+                        var pb = root.personalBests(), rows = [];
+                        if (pb.longest) rows.push({ k: "Longest run", v: root.fmtDist(pb.longest.summary.distanceM), sub: pb.longest.name || "" });
+                        if (pb.climb && pb.climb.summary.elevGainM > 0) rows.push({ k: "Biggest climb", v: "+" + root.fmtElev(pb.climb.summary.elevGainM), sub: pb.climb.name || "" });
+                        if (pb.fastest) rows.push({ k: "Fastest pace", v: root.fmtPace(pb.fastest.summary.avgPaceSecPerKm), sub: pb.fastest.name || "" });
+                        return rows;
+                    }
+                    delegate: RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing.medium
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 1
+                            LogosText { text: modelData.k; color: Theme.palette.textSecondary; font.pixelSize: 13 }
+                            LogosText { text: modelData.sub; color: Theme.palette.textTertiary; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
+                        }
+                        LogosText { text: modelData.v; color: Theme.palette.primary; font.pixelSize: 16; font.weight: Theme.typography.weightMedium }
+                    }
+                }
+
+                Item { Layout.fillHeight: true }
             }
         }
 

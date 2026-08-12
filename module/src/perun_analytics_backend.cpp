@@ -140,8 +140,25 @@ void PerunAnalyticsBackend::openStoreAndLoad() {
     QJsonParseError err{};
     const QJsonDocument doc =
         QJsonDocument::fromJson(QByteArray::fromStdString(j), &err);
-    if (err.error == QJsonParseError::NoError && doc.isObject())
-      m_runs.append(doc.object());
+    if (err.error != QJsonParseError::NoError || !doc.isObject())
+      continue;
+    QJsonObject run = doc.object();
+    // Recompute analytics from the stored GPX blob so runs ingested BEFORE an
+    // analytics change (e.g. the elevation-gain fix) show corrected numbers on
+    // the next launch — no re-sync needed. Falls back to the stored json if the
+    // blob is missing or unparseable.
+    const QString id = run.value(QStringLiteral("id")).toString();
+    const std::string gz = m_store.getGpx(id.toStdString());
+    if (!gz.empty()) {
+      try {
+        const perun::Track tr = perun::fromGpx(
+            perun::gunzip(QByteArray(gz.data(), static_cast<int>(gz.size()))));
+        run = runToJson(id, run.value(QStringLiteral("rev")).toInt(1), tr);
+      } catch (const std::exception &e) {
+        logEvent(std::string("reanalyse on load failed: ") + e.what());
+      }
+    }
+    m_runs.append(run);
   }
   logEvent("loaded " + std::to_string(m_runs.size()) + " persisted runs");
   if (!m_runs.isEmpty())
@@ -406,6 +423,10 @@ QString PerunAnalyticsBackend::trackJson(QString runId) {
     QJsonArray pts;
     for (const auto &p : tr.points)
       pts.append(QJsonObject{{"lat", p.lat}, {"lon", p.lon}, {"alt", p.alt},
+                             // altValid lets the elevation chart skip no-fix
+                             // points (which parse to alt=0) instead of drawing
+                             // a spike to zero.
+                             {"altValid", p.altValid},
                              {"hr", p.hr}, {"t", static_cast<qint64>(p.t)},
                              // The map must not draw across a pause.
                              {"brk", p.brk}});
