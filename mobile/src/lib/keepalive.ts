@@ -13,8 +13,17 @@
 import { NativeModules } from "react-native";
 
 const PerunLocation = (NativeModules as any).PerunLocation as
-  | { start: () => Promise<boolean>; stop: () => Promise<boolean> }
+  | { start: () => Promise<boolean>; stop: () => Promise<boolean>; update: (text: string) => Promise<boolean> }
   | undefined;
+
+/** Update the ongoing recording notification with live run stats (silent). */
+export async function updateRunNotification(text: string): Promise<void> {
+  try {
+    await PerunLocation?.update?.(text);
+  } catch {
+    /* service not up / update failed — harmless */
+  }
+}
 
 /** Start the recording foreground service (best-effort; never throws to the caller). */
 export async function startRunService(): Promise<void> {

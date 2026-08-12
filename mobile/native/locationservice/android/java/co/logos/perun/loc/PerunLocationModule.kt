@@ -1,5 +1,6 @@
 package co.logos.perun.loc
 
+import android.app.NotificationManager
 import android.content.Intent
 import android.os.Build
 import com.facebook.react.bridge.Promise
@@ -19,6 +20,19 @@ class PerunLocationModule(private val ctx: ReactApplicationContext) : ReactConte
       promise.resolve(true)
     } catch (e: Throwable) {
       promise.reject("perun_loc_start", e.message, e)
+    }
+  }
+
+  // Live-update the ongoing notification text with current run stats (silent — the
+  // notification is IMPORTANCE_LOW + setOnlyAlertOnce). No-op-safe if the service isn't up.
+  @ReactMethod
+  fun update(text: String, promise: Promise) {
+    try {
+      val nm = ctx.getSystemService(NotificationManager::class.java)
+      nm.notify(PerunLocationService.NOTIF_ID, PerunLocationService.build(ctx, text))
+      promise.resolve(true)
+    } catch (e: Throwable) {
+      promise.reject("perun_loc_update", e.message, e)
     }
   }
 

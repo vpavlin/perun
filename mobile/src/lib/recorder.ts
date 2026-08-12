@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import * as Location from "expo-location";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
-import { startRunService, stopRunService } from "./keepalive";
+import { startRunService, stopRunService, updateRunNotification } from "./keepalive";
 import { GeoPoint, Track, Sport, sportInfo } from "./types";
 import { computeSummary, haversine } from "./analytics";
 
@@ -169,6 +169,25 @@ async function requestForeground(): Promise<PermissionState> {
   }
 }
 
+// Live recording notification: distance · elapsed · pace. Drives the ongoing FGS
+// notification so you can glance at the phone (or the lock screen, in a pocket) and
+// see the run without opening the app.
+let notifTimer: ReturnType<typeof setInterval> | null = null;
+function fmtDur(s: number): string {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${p(m)}:${p(sec)}` : `${m}:${p(sec)}`;
+}
+function fmtPace(secPerKm: number): string {
+  if (!(secPerKm > 0) || !isFinite(secPerKm)) return "--:--";
+  const m = Math.floor(secPerKm / 60), s = Math.round(secPerKm % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+function notifText(s: LiveStats): string {
+  return `${(s.distanceM / 1000).toFixed(2)} km · ${fmtDur(s.durationS)} · ${fmtPace(s.paceSecPerKm)}/km`;
+}
+
 /** Start recording (foreground only). false if location permission was denied. */
 export async function startRecording(sport: Sport = "running"): Promise<boolean> {
   if ((await requestForeground()) !== "granted") return false;
@@ -177,6 +196,10 @@ export async function startRecording(sport: Sport = "running"): Promise<boolean>
     fgSub = await Location.watchPositionAsync(RECORDER_OPTIONS, (fix) => session.ingest(fix));
     // Keep the process (and thus this foreground watch) alive when backgrounded / screen off.
     await startRunService();
+    // Push live stats to the notification every 2s (silent — setOnlyAlertOnce).
+    if (notifTimer) clearInterval(notifTimer);
+    updateRunNotification(notifText(session.liveStats()));
+    notifTimer = setInterval(() => updateRunNotification(notifText(session.liveStats())), 2000);
     return true;
   } catch (e) {
     console.log("[perun] watchPositionAsync failed:", e);
@@ -188,6 +211,7 @@ export async function startRecording(sport: Sport = "running"): Promise<boolean>
 
 /** Stop recording and return the finished Track. Never throws. */
 export async function stopRecording(): Promise<Track> {
+  if (notifTimer) { clearInterval(notifTimer); notifTimer = null; }
   session.end();
   if (fgSub) { try { fgSub.remove(); } catch { /* ignore */ } fgSub = null; }
   await stopRunService();
