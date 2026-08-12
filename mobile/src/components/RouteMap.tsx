@@ -36,9 +36,29 @@ function useTiles(layout: MapLayout | null): Record<string, string> {
   return uris;
 }
 
-export function RouteMap({ points, width, height }: { points: GeoPoint[]; width: number; height: number }) {
-  const layout = React.useMemo(() => buildLayout(points, width, height), [points, width, height]);
-  const uris = useTiles(layout);
+export function RouteMap({
+  points,
+  width,
+  height,
+  hideBasemap = false,
+  fitPoints,
+}: {
+  points: GeoPoint[];
+  width: number;
+  height: number;
+  /** Drop the OSM basemap — draw the track on the plain dark background only.
+   *  For privacy when sharing (the route shape stays, the where does not). */
+  hideBasemap?: boolean;
+  /** Points to fit the viewport to (defaults to `points`). Pass a subset — e.g.
+   *  the last ~150 m — for a "follow"/zoomed crop while the full track is still
+   *  drawn. The projection is shared, so the polyline still registers. */
+  fitPoints?: GeoPoint[];
+}) {
+  const fit = fitPoints && fitPoints.length >= 2 ? fitPoints : points;
+  const layout = React.useMemo(() => buildLayout(fit, width, height), [fit, width, height]);
+  // Skip the tile fetch entirely when the basemap is hidden — no network, and
+  // the effect's key never changes so it stays quiet.
+  const uris = useTiles(hideBasemap ? null : layout);
   if (!points || points.length < 2 || !layout) return null;
 
   // One polyline per segment: a point flagged `brk` opens a new one, so a pause
@@ -53,7 +73,7 @@ export function RouteMap({ points, width, height }: { points: GeoPoint[]; width:
 
   const [sx, sy] = layout.project(points[0]);
   const [ex, ey] = layout.project(points[points.length - 1]);
-  const hasTiles = layout.tiles.some((t) => uris[t.id]);
+  const hasTiles = !hideBasemap && layout.tiles.some((t) => uris[t.id]);
 
   return (
     <View>

@@ -3,11 +3,11 @@ import {
   SafeAreaView, View, Text, Pressable, SectionList, ScrollView,
   StyleSheet, StatusBar, Dimensions, Alert, Linking, BackHandler,
 } from "react-native";
-import { Run, Track, Sport, SPORTS, sportInfo } from "./src/lib/types";
+import { Run, Track, Sport, Split, SPORTS, sportInfo } from "./src/lib/types";
 import { Identity } from "./src/lib/identity";
 import {
   computeSummary, computeSplits, fmtDist, fmtPace, fmtDur, fmtElev,
-  fmtRate, rateLabel, fmtDate, groupByWeek,
+  fmtRate, rateLabel, fmtDate, groupByWeek, tailByDistance,
 } from "./src/lib/analytics";
 import { useRecorder, useGpsProbe, clearStaleTask } from "./src/lib/recorder";
 import { loadRuns, saveRun, deleteRun } from "./src/lib/store";
@@ -16,6 +16,7 @@ import { exportRun } from "./src/lib/gpxExport";
 import { syncRun } from "./src/lib/runSync";
 import { deliveryAvailable } from "./src/lib/delivery";
 import { RouteMap } from "./src/components/RouteMap";
+import { ElevationChart } from "./src/components/ElevationChart";
 import { RunMeta } from "./src/components/RunMeta";
 import { HoldButton } from "./src/components/HoldButton";
 import { Countdown } from "./src/components/Countdown";
@@ -48,6 +49,12 @@ export default function App() {
   // running gate would silently drop a cycling descent) and pace-vs-speed.
   const [sport, setSport] = useState<Sport>("running");
   const [counting, setCounting] = useState(false);
+  // Recording-map view (issue #1): follow = zoomed crop around the current
+  // location; full = the whole route. `followM` is the crop radius in metres
+  // (the +/- zoom). Lifted here because the recording UI lives in a conditional
+  // branch of this component and hooks can't be conditional.
+  const [mapFollow, setMapFollow] = useState(false);
+  const [followM, setFollowM] = useState(150);
   const rec = useRecorder();
   // Probe (and warm) the GPS only while the start dock is actually on screen.
   const gps = useGpsProbe(!rec.isRecording && !selected && !pairing && !counting);
@@ -161,6 +168,17 @@ export default function App() {
   if (rec.isRecording) {
     const s = rec.liveStats;
     const foot = sportInfo(rec.sport).foot;
+    // Live analytics over the run-so-far: same fold as the saved run, so splits
+    // and elevation on this page match the detail page exactly. computeSummary/
+    // computeSplits only read points/hasAlt/hasHr, so a synthetic track is fine.
+    const hasAlt = rec.points.some((p) => p.alt != null);
+    const liveTrack: Track = { points: rec.points, hasAlt, hasHr: false };
+    const liveSummary = computeSummary(liveTrack);
+    const liveSplits = computeSplits(liveTrack);
+    // Follow mode fits the viewport to the last `followM` metres so the map is a
+    // zoomed crop tracking you; the full polyline is still drawn on top.
+    const followPts = mapFollow ? tailByDistance(rec.points, followM) : undefined;
+    const W_ = W();
     return (
       <SafeAreaView style={styles.root}>
         <StatusBar barStyle="light-content" />
@@ -169,9 +187,9 @@ export default function App() {
             {sportInfo(rec.sport).label} · {rec.isPaused ? "paused" : "recording"}
           </Text>
         </View>
-        {/* One hero metric + two supporting — readable in a <1s glance while
-            moving, rather than four equal-weight tiles. `Points` was a debug
-            counter and is gone. */}
+        <ScrollView contentContainerStyle={{ paddingBottom: 108 }} showsVerticalScrollIndicator={false}>
+        {/* One hero metric + supporting stats — readable in a <1s glance while
+            moving, rather than equal-weight tiles. */}
         <View style={styles.heroWrap}>
           <Text style={styles.heroK}>Distance</Text>
           <Text style={[styles.heroV, rec.isPaused && styles.heroVPaused]}>{fmtDist(s.distanceM)}</Text>
@@ -188,9 +206,13 @@ export default function App() {
             <Text style={styles.tileK}>{rateLabel(foot)}</Text>
             <Text style={styles.subV}>{fmtRate(s.paceSecPerKm, foot)}</Text>
           </View>
+          <View style={styles.subStat}>
+            <Text style={styles.tileK}>Elev gain</Text>
+            <Text style={styles.subV}>{fmtElev(liveSummary.elevGainM)}</Text>
+          </View>
         </View>
-        <View style={[styles.mapBox, { width: W(), height: 220, margin: 16 }]}>
-          <RouteMap points={rec.points} width={W()} height={220} />
+        <View style={[styles.mapBox, { width: W_, height: 220, marginHorizontal: 16, marginTop: 16 }]}>
+          <RouteMap points={rec.points} width={W_} height={220} fitPoints={followPts} />
           {/* Tell the truth about WHY the map is empty. The recorder uses
               distanceInterval: 1, i.e. Android's setSmallestDisplacement(1) — no
               fix is delivered until you move a metre. So standing at the start
@@ -200,6 +222,38 @@ export default function App() {
           {rec.points.length === 0 && <Text style={styles.mapHint}>Acquiring GPS…</Text>}
           {rec.points.length === 1 && <Text style={styles.mapHint}>GPS locked — start moving</Text>}
         </View>
+        {/* Map view controls (issue #1): follow-vs-full and zoom (which shrinks
+            the follow crop). Zoom only applies in follow mode. */}
+        <View style={styles.mapCtrlRow}>
+          <Pressable style={[styles.mapCtrlBtn, mapFollow && styles.mapCtrlBtnOn]} onPress={() => setMapFollow((v) => !v)}>
+            <Text style={[styles.mapCtrlText, mapFollow && styles.mapCtrlTextOn]}>{mapFollow ? "◎ Following" : "◍ Full route"}</Text>
+          </Pressable>
+          {mapFollow && (
+            <>
+              <Pressable style={styles.mapZoomBtn} onPress={() => setFollowM((m) => Math.min(1500, Math.round(m * 1.6)))}>
+                <Text style={styles.mapZoomText}>–</Text>
+              </Pressable>
+              <Pressable style={styles.mapZoomBtn} onPress={() => setFollowM((m) => Math.max(50, Math.round(m / 1.6)))}>
+                <Text style={styles.mapZoomText}>+</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+        {hasAlt && liveSummary.elevGainM > 0 && (
+          <>
+            <Text style={styles.sectionLabel}>ELEVATION</Text>
+            <View style={[styles.mapBox, { width: W_, height: 110, marginHorizontal: 16 }]}>
+              <ElevationChart points={rec.points} width={W_} height={110} />
+            </View>
+          </>
+        )}
+        {liveSplits.length > 0 && (
+          <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
+            <Text style={styles.sectionLabel}>SPLITS</Text>
+            <SplitsTable splits={liveSplits} foot={foot} width={W_} />
+          </View>
+        )}
+        </ScrollView>
         {/* Pause is the common action mid-run (lights, crossings) and stays a
             single tap. Stop is the irreversible one — the run ends and saves —
             so it requires a deliberate hold. */}
@@ -345,6 +399,47 @@ function Tile({ k, v }: { k: string; v: string }) {
   );
 }
 
+// Per-km splits table: KM · pace/speed · elevation gain · HR, with a bar scaled
+// by pace across the shown splits (fastest = full, slowest = 25%). Shared by the
+// run detail and the live recording page (which passes splits of the run so far).
+function SplitsTable({ splits, foot, width }: { splits: Split[]; foot: boolean; width: number }) {
+  if (!splits.length) return null;
+  const paces = splits.map((x) => x.paceSecPerKm).filter((p) => p > 0);
+  const fastest = paces.length ? Math.min(...paces) : 0;
+  const slowest = paces.length ? Math.max(...paces) : 0;
+  const barFor = (pace: number) => {
+    const max = Math.max(4, width - 240);
+    if (!pace || pace <= 0 || slowest <= 0) return 4;
+    if (slowest === fastest) return max;
+    const t = (slowest - pace) / (slowest - fastest);
+    return Math.max(max * 0.25, max * (0.25 + 0.75 * t));
+  };
+  return (
+    <>
+      <View style={styles.splitHead}>
+        <Text style={[styles.splitH, { width: 34 }]}>KM</Text>
+        <Text style={[styles.splitH, { width: 84 }]}>{foot ? "PACE" : "SPEED"}</Text>
+        <Text style={[styles.splitH, { width: 66 }]}>ELEV</Text>
+        <Text style={styles.splitH}>HR</Text>
+      </View>
+      {splits.map((sp) => (
+        <View key={sp.index} style={styles.splitRow}>
+          <Text style={[styles.splitCell, { width: 34 }]}>{sp.index}</Text>
+          <Text style={[styles.splitCell, { width: 84 }]}>{fmtRate(sp.paceSecPerKm, foot)}</Text>
+          <Text style={[styles.splitCellSec, { width: 66 }]}>+{fmtElev(sp.elevGainM)}</Text>
+          <Text style={[styles.splitCellSec, { width: 40 }]}>{sp.avgHr > 0 ? Math.round(sp.avgHr) : "—"}</Text>
+          <View style={styles.barTrack}>
+            <View style={[styles.barFill, {
+              width: barFor(sp.paceSecPerKm),
+              backgroundColor: sp.paceSecPerKm === fastest ? theme.success : theme.primary,
+            }]} />
+          </View>
+        </View>
+      ))}
+    </>
+  );
+}
+
 function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
   run: Run; onChange: (r: Run) => void; paired: boolean;
   onNeedPairing: () => void; onDelete: (r: Run) => void;
@@ -362,21 +457,9 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
     // hold a value is noise. It still shows for an imported Garmin/Strava track.
     ...(s.hasHr ? ([["Avg HR", Math.round(s.avgHr) + " bpm"]] as [string, string][]) : []),
   ];
-  // Splits bar: scale by PACE across this run's splits. It used to scale by
-  // distanceM, but computeSplits only closes a split at >=1000 m, so every full
-  // split clamped to full width — a chart that encoded nothing while implying a
-  // comparison. Fastest split = full bar.
-  const paces = run.splits.map((x) => x.paceSecPerKm).filter((p) => p > 0);
-  const fastest = paces.length ? Math.min(...paces) : 0;
-  const slowest = paces.length ? Math.max(...paces) : 0;
-  const barFor = (pace: number) => {
-    const max = Math.max(4, w - 240);
-    if (!pace || pace <= 0 || slowest <= 0) return 4;
-    if (slowest === fastest) return max; // single split / all equal
-    // faster (lower secPerKm) => longer bar; floor at 25% so slow splits stay visible
-    const t = (slowest - pace) / (slowest - fastest);
-    return Math.max(max * 0.25, max * (0.25 + 0.75 * t));
-  };
+  // Hide-map (issue #2): drop the OSM basemap before sharing so the route shape,
+  // times and elevation stay but the *where* doesn't. Off by default.
+  const [hideMap, setHideMap] = useState(false);
   const share = async () => {
     try { await exportRun(run); }
     catch (e) { Alert.alert("Export failed", e instanceof Error ? e.message : String(e)); }
@@ -402,29 +485,23 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
       </View>
 
       <View style={[styles.mapBox, { width: w, height: 220 }]}>
-        <RouteMap points={run.track.points} width={w} height={220} />
+        <RouteMap points={run.track.points} width={w} height={220} hideBasemap={hideMap} />
       </View>
+      <Pressable style={styles.mapToggle} onPress={() => setHideMap((v) => !v)}>
+        <Text style={styles.mapToggleText}>{hideMap ? "◻ Show map" : "◼ Hide map (privacy)"}</Text>
+      </Pressable>
 
-      <View style={styles.splitHead}>
-        <Text style={[styles.splitH, { width: 34 }]}>KM</Text>
-        <Text style={[styles.splitH, { width: 84 }]}>{foot ? "PACE" : "SPEED"}</Text>
-        <Text style={[styles.splitH, { width: 66 }]}>ELEV</Text>
-        <Text style={styles.splitH}>HR</Text>
-      </View>
-      {run.splits.map((sp) => (
-        <View key={sp.index} style={styles.splitRow}>
-          <Text style={[styles.splitCell, { width: 34 }]}>{sp.index}</Text>
-          <Text style={[styles.splitCell, { width: 84 }]}>{fmtRate(sp.paceSecPerKm, foot)}</Text>
-          <Text style={[styles.splitCellSec, { width: 66 }]}>+{fmtElev(sp.elevGainM)}</Text>
-          <Text style={[styles.splitCellSec, { width: 40 }]}>{sp.avgHr > 0 ? Math.round(sp.avgHr) : "—"}</Text>
-          <View style={styles.barTrack}>
-            <View style={[styles.barFill, {
-              width: barFor(sp.paceSecPerKm),
-              backgroundColor: sp.paceSecPerKm === fastest ? theme.success : theme.primary,
-            }]} />
+      {run.summary.elevGainM > 0 && (
+        <>
+          <Text style={styles.sectionLabel}>ELEVATION</Text>
+          <View style={[styles.mapBox, { width: w, height: 120 }]}>
+            <ElevationChart points={run.track.points} width={w} height={120} />
           </View>
-        </View>
-      ))}
+        </>
+      )}
+
+      <Text style={styles.sectionLabel}>SPLITS</Text>
+      <SplitsTable splits={run.splits} foot={foot} width={w} />
 
       <Pressable style={styles.exportBtn} onPress={share}>
         <Text style={styles.exportText}>Export GPX</Text>
@@ -508,6 +585,17 @@ const styles = StyleSheet.create({
   splitCellSec: { color: theme.textSecondary, fontSize: 13 },
   barTrack: { flex: 1, height: 10, backgroundColor: theme.card, borderRadius: 3, overflow: "hidden" },
   barFill: { height: 10, backgroundColor: theme.primary, borderRadius: 3 },
+  // Section headers + map controls (issues #1/#2)
+  sectionLabel: { color: theme.textTertiary, fontSize: 11, fontWeight: "700", letterSpacing: 1, marginTop: 16, marginBottom: 8 },
+  mapToggle: { alignSelf: "flex-start", marginTop: 8, paddingVertical: 4 },
+  mapToggleText: { color: theme.primary, fontSize: 13, fontWeight: "600" },
+  mapCtrlRow: { flexDirection: "row", gap: 8, marginTop: 8, paddingHorizontal: 16, alignItems: "center" },
+  mapCtrlBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
+  mapCtrlBtnOn: { backgroundColor: theme.elevated, borderColor: theme.primary },
+  mapCtrlText: { color: theme.textSecondary, fontSize: 13, fontWeight: "600" },
+  mapCtrlTextOn: { color: theme.primary },
+  mapZoomBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border, alignItems: "center", justifyContent: "center" },
+  mapZoomText: { color: theme.text, fontSize: 20, fontWeight: "700", lineHeight: 22 },
   exportBtn: { marginTop: 12, borderWidth: 1, borderColor: theme.border, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
   exportText: { color: theme.text, fontSize: 15, fontWeight: "600" },
   syncBtn: { backgroundColor: theme.primary, borderColor: theme.primary },

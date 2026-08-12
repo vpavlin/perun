@@ -1,7 +1,7 @@
 // Run analytics — TypeScript port of the module's run_analytics.h. Same
 // haversine distance, pace, elevation gain, HR and per-km splits, so the phone
 // and the Basecamp module compute identical numbers.
-import { Track, RunSummary, Split } from "./types";
+import { Track, RunSummary, Split, GeoPoint } from "./types";
 
 const R = 6371000;
 const D2R = Math.PI / 180;
@@ -83,6 +83,27 @@ export function computeSplits(tr: Track, splitMeters = 1000): Split[] {
   }
   if (splitDist > 1) close();
   return splits;
+}
+
+/**
+ * The tail of a track covering roughly the last `meters` of travelled distance —
+ * used to build a "follow" (zoomed-in) map crop around the current location while
+ * the full polyline is still drawn from all points. Walks backwards accumulating
+ * segment lengths (breaks don't add distance) until the budget is spent. Always
+ * returns >=2 points when the track has them, so buildLayout can fit a viewport.
+ */
+export function tailByDistance(points: GeoPoint[], meters: number): GeoPoint[] {
+  if (points.length < 2) return points;
+  const out: GeoPoint[] = [points[points.length - 1]];
+  let acc = 0;
+  for (let i = points.length - 1; i > 0; i--) {
+    out.push(points[i - 1]);
+    if (!points[i].brk) {
+      acc += haversine(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon);
+    }
+    if (acc >= meters) break;
+  }
+  return out.reverse();
 }
 
 // ---- formatting helpers (match the QML view) ----
