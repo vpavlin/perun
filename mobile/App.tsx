@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   SafeAreaView, View, Text, Pressable, SectionList, ScrollView,
   StyleSheet, StatusBar, Dimensions, Alert, Linking, BackHandler,
@@ -13,6 +13,7 @@ import { useRecorder, useGpsProbe, clearStaleTask } from "./src/lib/recorder";
 import { loadRuns, saveRun, deleteRun } from "./src/lib/store";
 import { loadIdentity } from "./src/lib/identityStore";
 import { exportRun } from "./src/lib/gpxExport";
+import { shareViewImage } from "./src/lib/imageExport";
 import { syncRun } from "./src/lib/runSync";
 import { deliveryAvailable } from "./src/lib/delivery";
 import { RouteMap } from "./src/components/RouteMap";
@@ -464,6 +465,16 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
     try { await exportRun(run); }
     catch (e) { Alert.alert("Export failed", e instanceof Error ? e.message : String(e)); }
   };
+  // Share-as-image: snapshot the card below exactly as rendered (so it honours
+  // the Hide-map toggle) and hand the PNG to the OS share sheet.
+  const shotRef = useRef<View>(null);
+  const [imgBusy, setImgBusy] = useState(false);
+  const shareImg = async () => {
+    setImgBusy(true);
+    try { await shareViewImage(shotRef, run.name); }
+    catch (e) { Alert.alert("Image share failed", e instanceof Error ? e.message : String(e)); }
+    finally { setImgBusy(false); }
+  };
   const [sync, setSync] = useState<string | null>(null);
   const doSync = async () => {
     if (!paired) { onNeedPairing(); return; } // no unpaired plaintext publishing
@@ -478,30 +489,47 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
   };
   return (
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
-      <RunMeta run={run} onChange={onChange} />
+      {/* Everything inside this card is what "Share image" snapshots — it
+          honours the Hide-map toggle, so a hidden map shares only the shape. */}
+      <View ref={shotRef} collapsable={false} style={styles.shotCard}>
+        <RunMeta run={run} onChange={onChange} />
 
-      <View style={styles.tiles}>
-        {tiles.map(([k, v]) => <Tile key={k} k={k} v={v} />)}
+        <View style={styles.tiles}>
+          {tiles.map(([k, v]) => <Tile key={k} k={k} v={v} />)}
+        </View>
+
+        <View style={[styles.mapBox, { width: w, height: 220 }]}>
+          <RouteMap points={run.track.points} width={w} height={220} hideBasemap={hideMap} />
+        </View>
+
+        {run.track.points.some((p) => p.alt != null) && (
+          <>
+            <Text style={styles.sectionLabel}>ELEVATION · +{fmtElev(run.summary.elevGainM)}</Text>
+            <View style={[styles.mapBox, { width: w, height: 120 }]}>
+              <ElevationChart points={run.track.points} width={w} height={120} />
+            </View>
+          </>
+        )}
+
+        <Text style={styles.sectionLabel}>SPLITS</Text>
+        <SplitsTable splits={run.splits} foot={foot} width={w} />
+
+        {/* Watermark so a shared image identifies itself. */}
+        <View style={styles.shotFooter}>
+          <Text style={styles.shotBrand}>PERUN</Text>
+          <Text style={styles.shotDate}>{fmtDate(run.startTs)}</Text>
+        </View>
       </View>
 
-      <View style={[styles.mapBox, { width: w, height: 220 }]}>
-        <RouteMap points={run.track.points} width={w} height={220} hideBasemap={hideMap} />
-      </View>
+      {/* Hide-map controls what BOTH the on-screen map and the shared image
+          show, so it sits with the share actions rather than under the map. */}
       <Pressable style={styles.mapToggle} onPress={() => setHideMap((v) => !v)}>
-        <Text style={styles.mapToggleText}>{hideMap ? "◻ Show map" : "◼ Hide map (privacy)"}</Text>
+        <Text style={styles.mapToggleText}>{hideMap ? "◻ Show map in image" : "◼ Hide map for sharing (privacy)"}</Text>
       </Pressable>
 
-      {run.track.points.some((p) => p.alt != null) && (
-        <>
-          <Text style={styles.sectionLabel}>ELEVATION · +{fmtElev(run.summary.elevGainM)}</Text>
-          <View style={[styles.mapBox, { width: w, height: 120 }]}>
-            <ElevationChart points={run.track.points} width={w} height={120} />
-          </View>
-        </>
-      )}
-
-      <Text style={styles.sectionLabel}>SPLITS</Text>
-      <SplitsTable splits={run.splits} foot={foot} width={w} />
+      <Pressable style={[styles.exportBtn, styles.shareImgBtn]} onPress={shareImg} disabled={imgBusy}>
+        <Text style={[styles.exportText, { color: "#1a1206" }]}>{imgBusy ? "Preparing image…" : "Share image"}</Text>
+      </Pressable>
 
       <Pressable style={styles.exportBtn} onPress={share}>
         <Text style={styles.exportText}>Export GPX</Text>
@@ -596,6 +624,12 @@ const styles = StyleSheet.create({
   mapCtrlTextOn: { color: theme.primary },
   mapZoomBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border, alignItems: "center", justifyContent: "center" },
   mapZoomText: { color: theme.text, fontSize: 20, fontWeight: "700", lineHeight: 22 },
+  // Share-as-image card (the captured region) + its watermark
+  shotCard: { backgroundColor: theme.bg, paddingTop: 4 },
+  shotFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 16, paddingTop: 10, borderTopWidth: 1, borderTopColor: theme.border },
+  shotBrand: { color: theme.primary, fontSize: 14, fontWeight: "800", letterSpacing: 2 },
+  shotDate: { color: theme.textTertiary, fontSize: 12 },
+  shareImgBtn: { backgroundColor: theme.primary },
   exportBtn: { marginTop: 12, borderWidth: 1, borderColor: theme.border, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
   exportText: { color: theme.text, fontSize: 15, fontWeight: "600" },
   syncBtn: { backgroundColor: theme.primary, borderColor: theme.primary },
