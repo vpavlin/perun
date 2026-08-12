@@ -54,7 +54,9 @@ inline QByteArray toGpx(const Track &tr) {
       s += "</trkseg><trkseg>\n";
     s += "<trkpt lat=\"" + QString::number(p.lat, 'f', 7) + "\" lon=\"" +
          QString::number(p.lon, 'f', 7) + "\">";
-    if (tr.hasAlt)
+    // Only emit <ele> for points that actually carried altitude — writing
+    // ele=0 for a no-fix point would recreate the phantom-swing on re-parse.
+    if (tr.hasAlt && p.altValid)
       s += "<ele>" + QString::number(p.alt, 'f', 1) + "</ele>";
     s += "<time>" +
          QDateTime::fromMSecsSinceEpoch(p.t, Qt::UTC).toString(Qt::ISODateWithMs) +
@@ -105,6 +107,7 @@ inline Track fromGpx(const QByteArray &xml) {
         tr.category = r.readElementText().toStdString();
       } else if (inPt && n == QLatin1String("ele")) {
         cur.alt = r.readElementText().toDouble();
+        cur.altValid = true; // this trkpt carried a real altitude
         tr.hasAlt = true;
       } else if (inPt && n == QLatin1String("time")) {
         cur.t = QDateTime::fromString(r.readElementText(), Qt::ISODateWithMs)

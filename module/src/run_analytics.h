@@ -42,6 +42,31 @@ inline double haversine(double lat1, double lon1, double lat2, double lon2) {
                        std::sin(dLon / 2) * std::sin(dLon / 2);
   return 2 * R * std::asin(std::min(1.0, std::sqrt(a)));
 }
+
+// Threshold-from-trough ascent accumulator — the C++ mirror of
+// makeElevAccumulator in mobile/src/lib/analytics.ts (keep them in step). GPS
+// altitude is noisy AND intermittent, so the old `alt - prevAlt, keep if >0`
+// both counted phantom swings across no-altitude points (alt=0) and summed raw
+// jitter → gain came out wildly high. This ignores samples with no valid
+// altitude and credits a climb only once it clears a 5 m noise floor measured
+// from the last local trough.
+constexpr double kElevThresholdM = 5.0;
+struct ElevAccumulator {
+  double ref = 0;     // last committed peak / running trough
+  bool primed = false;
+  void reset() { primed = false; } // call across a break so a pause isn't bridged
+  // Feed one point; returns metres of ascent to credit (0 unless a sustained
+  // climb just cleared the threshold).
+  double add(const GeoPoint &p) {
+    if (!p.altValid)
+      return 0.0;
+    if (!primed) { ref = p.alt; primed = true; return 0.0; }
+    const double d = p.alt - ref;
+    if (d >= kElevThresholdM) { ref = p.alt; return d; } // committed climb
+    if (p.alt < ref) ref = p.alt; // new low — measure the next climb from here
+    return 0.0;
+  }
+};
 } // namespace detail
 
 inline RunSummary computeSummary(const Track &tr) {
@@ -53,16 +78,17 @@ inline RunSummary computeSummary(const Track &tr) {
   double hrSum = 0;
   int hrCount = 0;
   int64_t movingMs = 0;
+  detail::ElevAccumulator elev;
+  if (tr.hasAlt) elev.add(p[0]); // seed the trough from the first fix
   for (size_t i = 1; i < p.size(); ++i) {
     // Skip the pair spanning a pause: no distance covered by the activity, and
     // the wall time in between is not moving time.
     if (!p[i].brk) {
       s.distanceM += detail::haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
       movingMs += p[i].t - p[i - 1].t;
-      if (tr.hasAlt) {
-        const double d = p[i].alt - p[i - 1].alt;
-        if (d > 0) s.elevGainM += d;
-      }
+      if (tr.hasAlt) s.elevGainM += elev.add(p[i]);
+    } else if (tr.hasAlt) {
+      elev.reset(); // don't bridge an ascent across a pause/teleport
     }
     if (tr.hasHr) { hrSum += p[i].hr; ++hrCount; }
   }
@@ -87,6 +113,10 @@ inline std::vector<Split> computeSplits(const Track &tr, double splitMeters = 10
   // Accumulate moving time so a pause mid-kilometre doesn't inflate that
   // split's pace.
   int64_t splitMs = 0;
+  // One accumulator for the whole track (trough reference carries across km
+  // boundaries); committed ascent lands in whichever split it happened in.
+  detail::ElevAccumulator elev;
+  if (tr.hasAlt) elev.add(p[0]);
 
   auto close = [&]() {
     Split sp;
@@ -103,10 +133,9 @@ inline std::vector<Split> computeSplits(const Track &tr, double splitMeters = 10
     if (!p[i].brk) {
       splitDist += detail::haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
       splitMs += p[i].t - p[i - 1].t;
-      if (tr.hasAlt) {
-        const double d = p[i].alt - p[i - 1].alt;
-        if (d > 0) splitElev += d;
-      }
+      if (tr.hasAlt) splitElev += elev.add(p[i]);
+    } else if (tr.hasAlt) {
+      elev.reset();
     }
     if (tr.hasHr) { hrSum += p[i].hr; ++hrCount; }
 

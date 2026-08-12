@@ -10,6 +10,12 @@ namespace perun {
 struct GeoPoint {
   double lat = 0, lon = 0;
   double alt = 0;    // metres
+  // A GPS fix can arrive with no vertical component, so the phone omits <ele>
+  // for that trkpt (mobile writes it only when p.alt is defined). Without a
+  // per-point flag those points parse to alt=0 and the analytics count a phantom
+  // ±alt swing across them — the elevation-gain-way-too-high bug. Mirrors the
+  // "skip undefined alt" behaviour in mobile/src/lib/analytics.ts.
+  bool altValid = false;
   double speed = 0;  // m/s (derived; not carried in GPX trkpt)
   int hr = 0;        // bpm
   int64_t t = 0;     // epoch ms
