@@ -166,7 +166,7 @@ void PerunAnalyticsBackend::openStoreAndLoad() {
 }
 
 // Recover + dispatch one sealed CHUNK envelope, regardless of transport or
-// base64 depth: the SDS reliable-channel wire (phone logos-transport real-node)
+// base64 depth: the SDS reliable-channel wire (phone loam-transport real-node)
 // is DOUBLE-base64, legacy plain relay is single. Try the payload raw, single-,
 // and double-base64-decoded; the first that authenticates with our pairing key
 // wins. Payload is nonce(12) + ChaCha20-Poly1305(env, aad=topic); a bad tag =
@@ -225,7 +225,7 @@ void PerunAnalyticsBackend::bootstrap() {
       });
 
   // Both legacy plain relay AND SDS reliable-channel receive route through the
-  // same handler; the phone (logos-transport) sends over channels.
+  // same handler; the phone (loam-transport) sends over channels.
   auto onSealed = [this](const QVariantList &data) {
     if (data.size() >= 3)
       ingestSealed(data.at(2).toByteArray());

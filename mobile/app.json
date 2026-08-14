@@ -2,7 +2,7 @@
   "expo": {
     "name": "Perun",
     "slug": "perun",
-    "version": "1.15.7",
+    "version": "1.15.8",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -18,8 +18,8 @@
       }
     },
     "android": {
-      "package": "co.logos.perun",
-      "versionCode": 24,
+      "package": "xyz.vpavlin.perun",
+      "versionCode": 25,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
@@ -55,7 +55,7 @@
           "recordAudioAndroid": false
         }
       ],
-      "./src/lib/logos-transport-pkg/plugins/withDeliveryClient.js",
+      "./src/lib/loam-transport-pkg/plugins/withDeliveryClient.js",
       "./plugins/withLocationService"
     ]
   }

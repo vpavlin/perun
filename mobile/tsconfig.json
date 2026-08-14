@@ -4,6 +4,6 @@
     "strict": true
   },
   "exclude": [
-    "src/lib/logos-transport-pkg/examples"
+    "src/lib/loam-transport-pkg/examples"
   ]
 }

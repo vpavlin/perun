@@ -1,7 +1,7 @@
-// Perun's thin adapter over the SHARED logos-transport (mobile/src/lib/logos-transport.ts).
+// Perun's thin adapter over the SHARED loam-transport (mobile/src/lib/loam-transport.ts).
 //
 // Perun used to drive its OWN embedded liblogosdelivery node via the LogosMessaging
-// JNI module directly. This routes the SAME sealed-bytes wire through logos-transport
+// JNI module directly. This routes the SAME sealed-bytes wire through loam-transport
 // instead, which can run either the app's embedded node (RealNode) or the device-wide
 // Logos Delivery SERVICE (ServiceNode) — toggled per user via preferServiceBackend.
 // The wire is unchanged: one derived content topic per pairing, and the whole
@@ -11,7 +11,7 @@
 // seal/open crypto (identity.ts), and envelope (JSON blob) framing.
 import { loadIdentity } from "./identityStore";
 import { seal, open, topicFor, Identity } from "./identity";
-import * as transport from "./logos-transport";
+import * as transport from "./loam-transport";
 import * as SecureStore from "expo-secure-store";
 
 // Documentation of the topic *shape*; live sends use topicFor(id).
