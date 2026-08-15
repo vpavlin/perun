@@ -16,6 +16,7 @@ import { exportRun } from "./src/lib/gpxExport";
 import { shareViewImage } from "./src/lib/imageExport";
 import { syncRun } from "./src/lib/runSync";
 import { deliveryAvailable } from "./src/lib/delivery";
+import { SharedNodeStatus } from "./src/lib/loam-transport-pkg/src/SharedNodeStatus";
 import { RouteMap } from "./src/components/RouteMap";
 import { ElevationChart } from "./src/components/ElevationChart";
 import { RunMeta } from "./src/components/RunMeta";
@@ -296,6 +297,8 @@ export default function App() {
           </Pressable>
         </View>
       </View>
+
+      <SharedNodeStatus appName="Perun" showSync style={{ marginHorizontal: 16 }} />
 
       {selected ? (
         <Detail run={selected} onChange={updateRun} paired={!!paired} onNeedPairing={openPairing} onDelete={removeRun} />
