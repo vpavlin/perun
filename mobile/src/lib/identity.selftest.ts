@@ -37,9 +37,13 @@ check("fingerprint", JSON.stringify(id.fingerprint) === JSON.stringify([PGP_EVEN
 const wire = unhex("a0a1a2a3a4a5a6a7a8a9aaab5e2b359167992fe372e07b7a8059dbf00c227e39bd8d116025");
 check("open(KAT wire)", new TextDecoder().decode(open(id, wire, topic)) === "perun-kat");
 
-// seal→open round-trips (random nonce path).
+// seal→open round-trips (deterministic id-derived nonce path, ADR 0011).
 const msg = ascii("hello perun");
-check("seal→open round-trip", new TextDecoder().decode(open(id, seal(id, msg, topic), topic)) === "hello perun");
+check("seal→open round-trip", new TextDecoder().decode(open(id, seal(id, "test-seal", msg, topic), topic)) === "hello perun");
+
+// same id => byte-identical ciphertext (store-dedup property); diff id => differs.
+check("seal deterministic (same id)", hex(seal(id, "test-seal", msg, topic)) === hex(seal(id, "test-seal", msg, topic)));
+check("seal differs (diff id)", hex(seal(id, "test-seal", msg, topic)) !== hex(seal(id, "other-seal", msg, topic)));
 
 // Pairing code round-trip + lenient scan parsing.
 check("encode/decode secret", hex(decodeSecret(encodeSecret(S))) === hex(S));

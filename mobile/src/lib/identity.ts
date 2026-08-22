@@ -72,9 +72,22 @@ export function topicFor(id: Identity, epoch = 0): string {
   return `/perun/1/${hex(t)}/proto`;
 }
 
-/** Encrypt plaintext bytes → nonce(12) ‖ ciphertext‖tag, AAD-bound to the topic. */
-export function seal(id: Identity, plaintext: Uint8Array, topic: string): Uint8Array {
-  const nonce = Crypto.getRandomBytes(12);
+/**
+ * Deterministic 12-byte AEAD nonce derived from a stable seal id (loam-sync
+ * ADR 0011, domain "perun", kym/qaku parity): HMAC-SHA256(Ke,
+ * "perun/nonce/v1|"+sealId)[0..11]. Re-sealing the same immutable chunk with
+ * the same id yields byte-identical ciphertext, so the fleet store dedups it.
+ */
+export function nonceFor(id: Identity, sealId: string): Uint8Array {
+  return hmac(sha256, id.Ke, enc(`perun/nonce/v1|${sealId}`)).slice(0, 12);
+}
+
+/**
+ * Encrypt plaintext bytes → nonce(12) ‖ ciphertext‖tag, AAD-bound to the topic.
+ * The nonce is derived deterministically from sealId via nonceFor (no RNG).
+ */
+export function seal(id: Identity, sealId: string, plaintext: Uint8Array, topic: string): Uint8Array {
+  const nonce = nonceFor(id, sealId);
   const ct = chacha20poly1305(id.Ke, nonce, enc(topic)).encrypt(plaintext);
   const out = new Uint8Array(nonce.length + ct.length);
   out.set(nonce, 0);

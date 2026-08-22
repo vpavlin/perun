@@ -13,6 +13,10 @@ import { loadIdentity } from "./identityStore";
 import { seal, open, topicFor, Identity } from "./identity";
 import * as transport from "./loam-transport";
 import * as SecureStore from "expo-secure-store";
+import * as Crypto from "expo-crypto";
+
+const HEX = "0123456789abcdef";
+const hex = (b: Uint8Array) => { let s = ""; for (const x of b) s += HEX[x >> 4] + HEX[x & 15]; return s; };
 
 // Documentation of the topic *shape*; live sends use topicFor(id).
 export const PERUN_TOPIC = "/perun/1/<derived-from-pairing-secret>/proto";
@@ -147,8 +151,20 @@ export async function ensureNode(onStatus?: (s: string) => void): Promise<string
 export async function sendEnvelope(env: object): Promise<void> {
   await ensureNode();
   const r = route!;
-  const sealed = seal(r.id, utf8Bytes(JSON.stringify(env)), r.topic);
+  const sealed = seal(r.id, sealIdFor(env), utf8Bytes(JSON.stringify(env)), r.topic);
   await transport.publishSealed(r.topic, sealed);
+}
+
+// The stable seal id feeding the deterministic nonce (ADR 0011). A CHUNK is
+// immutable and uniquely identified by run+rev+seq, so re-sending it re-seals
+// byte-identical → the fleet store dedups it. Any other (control) frame gets a
+// fresh random id so distinct control frames are never collapsed together.
+function sealIdFor(env: object): string {
+  const e = env as { type?: unknown; id?: unknown; rev?: unknown; seq?: unknown };
+  if (e.type === "CHUNK" && e.id != null && e.rev != null && e.seq != null) {
+    return `${e.id}|${e.rev}|${e.seq}`;
+  }
+  return hex(Crypto.getRandomBytes(12));
 }
 
 /** Subscribe to incoming Delivery messages (returns an unsubscribe fn). */

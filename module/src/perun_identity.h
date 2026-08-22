@@ -34,8 +34,16 @@ Identity deriveIdentity(const Bytes &secret);
 //   "/perun/1/" + hex(HMAC-SHA256(K, "perun/topic/v1|"+epoch)[0..15]) + "/proto"
 std::string topicFor(const Identity &id, long epoch = 0);
 
+// Deterministic 12-byte AEAD nonce derived from a stable seal id (loam-sync
+// ADR 0011, domain "perun", kym/qaku parity): HMAC-SHA256(Ke,
+// "perun/nonce/v1|"+sealId)[0..11]. Re-sealing the same immutable chunk with
+// the same id yields byte-identical ciphertext, so the fleet store dedups it.
+Bytes nonceFor(const Identity &id, const std::string &sealId);
+
 // Encrypt: nonce(12) || ChaCha20-Poly1305(Ke, nonce, plaintext, aad=topic).
-Bytes seal(const Identity &id, const Bytes &plaintext, const std::string &topic);
+// The nonce is derived deterministically from sealId via nonceFor (no RNG).
+Bytes seal(const Identity &id, const std::string &sealId, const Bytes &plaintext,
+           const std::string &topic);
 
 // Decrypt seal() output. On auth failure returns empty and *ok=false.
 Bytes open(const Identity &id, const Bytes &sealed, const std::string &topic, bool *ok = nullptr);

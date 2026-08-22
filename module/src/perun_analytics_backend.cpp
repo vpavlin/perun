@@ -316,8 +316,12 @@ QString PerunAnalyticsBackend::sendChunks(const QString &runId, int rev,
         {"total", total},
         {"gz", QString::fromLatin1(part.toBase64())}};
     // Encrypt the envelope for the paired phone (same seal format it decrypts).
+    // Deterministic nonce (ADR 0011): a chunk is uniquely identified by
+    // run+rev+seq, so re-sending it re-seals byte-identical → the store dedups.
+    const std::string sealId =
+        runId.toStdString() + "|" + std::to_string(rev) + "|" + std::to_string(seq);
     const QByteArray sealed = fromBytes(perun::seal(
-        m_id, toBytes(QJsonDocument(env).toJson(QJsonDocument::Compact)),
+        m_id, sealId, toBytes(QJsonDocument(env).toJson(QJsonDocument::Compact)),
         m_topic.toStdString()));
     // channelSend to match the phone's SDS reliable-channel wire: pass
     // base64(sealed); the delivery FFI base64s once more (double-base64).

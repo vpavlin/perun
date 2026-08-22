@@ -135,9 +135,17 @@ std::string topicFor(const Identity &id, long epoch) {
   return "/perun/1/" + toHex(t, 16) + "/proto";
 }
 
-Bytes seal(const Identity &id, const Bytes &plaintext, const std::string &topic) {
-  Bytes nonce(12, 0);
-  RAND_bytes(nonce.data(), 12);
+Bytes nonceFor(const Identity &id, const std::string &sealId) {
+  // loam-sync ADR 0011: deterministic id-derived AEAD nonce (domain "perun",
+  // kym/qaku parity). HMAC-SHA256(Ke, "perun/nonce/v1|"+sealId), first 12 bytes.
+  Bytes n = hmacSha256(id.Ke, toBytes("perun/nonce/v1|" + sealId));
+  n.resize(12);
+  return n;
+}
+
+Bytes seal(const Identity &id, const std::string &sealId, const Bytes &plaintext,
+           const std::string &topic) {
+  const Bytes nonce = nonceFor(id, sealId);
   Bytes ct, tag;
   if (!aead(true, id.Ke, nonce, toBytes(topic), plaintext, ct, tag)) return {};
   Bytes out = nonce;
@@ -243,11 +251,17 @@ int main() {
   Bytes pt = open(id, wire, topic, &ok);
   check("open(phone wire)", ok && std::string(pt.begin(), pt.end()) == "perun-kat");
 
-  // our own seal must round-trip through open (random nonce)
+  // our own seal must round-trip through open (deterministic id-derived nonce)
   Bytes msg = {'p', 'e', 'r', 'u', 'n', '-', 'k', 'a', 't'};
-  Bytes sealed = seal(id, msg, topic);
+  Bytes sealed = seal(id, "test-seal", msg, topic);
   Bytes back = open(id, sealed, topic, &ok);
   check("seal->open roundtrip", ok && back == msg);
+
+  // same id => byte-identical ciphertext (store-dedup property, ADR 0011)
+  Bytes sealed2 = seal(id, "test-seal", msg, topic);
+  check("seal deterministic (same id)", sealed == sealed2);
+  Bytes sealedDiff = seal(id, "other-seal", msg, topic);
+  check("seal differs (diff id)", sealed != sealedDiff);
 
   // wrong topic (AAD) must fail
   Bytes bad = open(id, wire, "/perun/1/wrong/proto", &ok);
