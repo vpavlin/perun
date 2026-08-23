@@ -18,6 +18,7 @@ import { GeoPoint } from "./types";
 import { sendAnnotation } from "./runSync";
 import { ensureNode, onMessage, getDeviceId, deliveryAvailable } from "./delivery";
 import { loadIdentity } from "./identityStore";
+import { replicatePending } from "./blob";
 
 export type AnnotationKind = "text" | "photo" | "voice" | "delete";
 
@@ -240,6 +241,7 @@ export async function startAnnotationReceive(): Promise<() => void> {
   try {
     await ensureNode();
     void resendUnsynced();
+    void replicatePending(); // push any on-device blobs the server doesn't have yet
   } catch {
     /* node couldn't start — the listener stays registered for when it does */
   }

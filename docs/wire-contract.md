@@ -156,6 +156,25 @@ newly-installed Basecamp sees nothing that already exists, and a phone reinstall
 runs — **the phone's local storage is currently the only durable copy**. Workaround needing
 nothing upstream: republish-on-demand over the existing CHUNK envelope.
 
+## Annotations (implemented)
+Journey annotations — text / photo / voice notes pinned to a point on a run — travel as
+their own sealed envelope, one event per note/edit/delete (append-only CRDT). Dedup by
+`a.id`; `kind:"delete"` is a tombstone removing `a.target`. Media bytes do NOT ride the
+wire: `blobId` is a content id (`sha256` of the sealed bytes) resolved via a local-first
+blob store, best-effort replicated to a swappable backend. See
+[`adr/0001`](adr/0001-journey-annotations-as-an-event-log.md) and
+[`adr/0002`](adr/0002-local-first-content-addressed-blobs.md).
+
+```
+{ v:1, type:"ANNOTATION", a:{ id, runId, lat, lon, ele, t, createdAt, author,
+                              kind:"text"|"photo"|"voice"|"delete",
+                              text?, blobId?, mime?, dur?, target? } }
+```
+
+Sealed + sent exactly like a `CHUNK` (household key, AAD = topic). Like runs, there is no
+cold-start backfill (Delivery has no Store query) — a device only receives annotations
+authored while subscribed, plus local re-sends of unsynced ones.
+
 ## Open (not yet implemented)
 - **Module→phone real runs**: the module *can* publish (`sendChunks`) but it is only wired to
   `publishSampleRun()` (the demo button). No real run travels desktop→phone.

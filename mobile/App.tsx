@@ -18,6 +18,7 @@ import { syncRun } from "./src/lib/runSync";
 import { deliveryAvailable } from "./src/lib/delivery";
 import { startAnnotationReceive } from "./src/lib/annotations";
 import { RunAnnotations } from "./src/components/Annotations";
+import { QuickAnnotate } from "./src/components/QuickAnnotate";
 import { SharedNodeStatus } from "./src/lib/loam-transport-pkg/src/SharedNodeStatus";
 import { RouteMap } from "./src/components/RouteMap";
 import { ElevationChart } from "./src/components/ElevationChart";
@@ -27,9 +28,9 @@ import { Countdown } from "./src/components/Countdown";
 import { PairingScreen } from "./src/components/PairingScreen";
 import { theme } from "./src/theme";
 
-function makeRun(track: Track): Run {
+function makeRun(track: Track, id: string): Run {
   return {
-    id: "run-" + Date.now(),
+    id,
     name: track.name || "Run",
     sport: track.sport,
     category: track.category,
@@ -128,7 +129,9 @@ export default function App() {
     }
     // Name by date, not `Run ${runs.length+1}` — that collides after any delete.
     track.name = `${sportInfo(track.sport).label} · ${fmtDate(track.points[0]?.t ?? Date.now())}`;
-    const run = makeRun(track);
+    // Reuse the id minted at record-start so any annotations pinned mid-run attach to
+    // this saved run (fallback keeps a legacy path working if runId is ever empty).
+    const run = makeRun(track, rec.runId || "run-" + Date.now());
     await saveRun(run);
     setRuns((r) => [run, ...r]);
     setSelected(run);
@@ -261,6 +264,8 @@ export default function App() {
             </>
           )}
         </View>
+        {/* Annotate the run live — pinned to your current point, stored on-device. */}
+        <QuickAnnotate runId={rec.runId} points={rec.points} />
         {hasAlt && (
           <>
             <Text style={styles.sectionLabel}>ELEVATION · +{fmtElev(liveSummary.elevGainM)}</Text>

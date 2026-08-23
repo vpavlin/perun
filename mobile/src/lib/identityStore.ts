@@ -6,7 +6,7 @@
 // cache so hot paths (every sendEnvelope) don't hit the keystore repeatedly.
 import * as SecureStore from "expo-secure-store";
 import { fromByteArray, toByteArray } from "base64-js";
-import { deriveIdentity, Identity } from "./identity";
+import { deriveIdentity, newSecret, Identity } from "./identity";
 
 const SECRET_KEY = "perun.pairing.secret"; // base64 of the 32-byte S
 
@@ -24,6 +24,25 @@ export async function loadIdentity(): Promise<Identity | null> {
 /** Synchronous peek at the cache — null if unpaired OR not yet loaded. */
 export function cachedIdentity(): Identity | null {
   return cache ?? null;
+}
+
+/**
+ * The identity, provisioning a solo "household of one" if the phone has none yet.
+ *
+ * Local-first crypto: an annotation's media is SEALED with the household key before it
+ * ever touches disk or a server, and its content id (CID) is sha256 of those sealed
+ * bytes — so a key must exist to capture media, even offline and unpaired. Rather than
+ * force the pairing UI just to record a voice note, we mint a self-owned secret on first
+ * use. Pairing later ADOPTS someone else's secret (overwriting this one); media captured
+ * under the old key stays readable locally (stored by CID) but won't re-seal under the
+ * new key — an acceptable edge (see docs/adr/0002). Caveat: the app currently treats
+ * "has a secret" as "paired", so a first solo capture makes the indicator read paired on
+ * the next launch; a proper solo-vs-shared distinction is deferred.
+ */
+export async function ensureIdentity(): Promise<Identity> {
+  const existing = await loadIdentity();
+  if (existing) return existing;
+  return saveSecret(newSecret());
 }
 
 /** Persist a new secret to the keystore and return (and cache) its derived identity. */

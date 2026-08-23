@@ -6,16 +6,13 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator, Alert, Dimensions, Image, Modal, Pressable, StyleSheet, Text, TextInput, View,
 } from "react-native";
-import * as ImagePicker from "expo-image-picker";
-import {
-  useAudioRecorder, useAudioPlayer, useAudioPlayerStatus, RecordingPresets,
-  requestRecordingPermissionsAsync, setAudioModeAsync,
-} from "expo-audio";
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { GeoPoint } from "../lib/types";
 import {
-  Annotation, AnnotationKind, useAnnotations, authorAnnotation, deleteAnnotation,
+  Annotation, AnnotationKind, useAnnotations, deleteAnnotation,
 } from "../lib/annotations";
-import { readFileBytes, uploadBlob, fetchBlob } from "../lib/blob";
+import { resolveBlobUri } from "../lib/blob";
+import { useCapture } from "../lib/useCapture";
 import { getDeviceId } from "../lib/delivery";
 import { RouteMap } from "./RouteMap";
 import { theme } from "../theme";
@@ -41,120 +38,47 @@ export function RunAnnotations({ run }: { run: { id: string; track: { points: Ge
   const [pickMode, setPickMode] = useState(false);
   const [pickPoint, setPickPoint] = useState<GeoPoint | null>(null);
   const [deviceId, setDeviceId] = useState<string>("");
-  const [busy, setBusy] = useState<string | null>(null);
-  const [caption, setCaption] = useState("");
   const [text, setText] = useState("");
-  const [recording, setRecording] = useState(false);
   const [photoView, setPhotoView] = useState<Annotation | null>(null);
 
   useEffect(() => { getDeviceId().then(setDeviceId).catch(() => {}); }, []);
 
-  // Voice recorder (hook must be unconditional). Recording UI is gated by `recording`.
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const recStartRef = React.useRef(0);
+  // All capture (text/photo/voice) goes through the shared, local-first hook.
+  const cap = useCapture(run.id);
+  const busy = cap.busy;
+  const recording = cap.recording;
 
   const targetPoint = pickPoint ?? lastPoint;
   const w = W();
 
   const markers = annotations.map((a) => ({ id: a.id, lat: a.lat, lon: a.lon, kind: a.kind }));
 
-  const resetComposer = () => { setText(""); setCaption(""); setPickPoint(null); setPickMode(false); };
+  const resetComposer = () => { setText(""); setPickPoint(null); setPickMode(false); };
 
   const addText = async () => {
-    const body = text.trim();
-    if (!body || !targetPoint) return;
-    setBusy("Saving note…");
-    try {
-      await authorAnnotation({ runId: run.id, point: targetPoint, kind: "text", text: body });
-      resetComposer();
-    } catch (e) {
-      Alert.alert("Couldn't save note", e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const addPhoto = async (fromCamera: boolean) => {
     if (!targetPoint) return;
-    try {
-      const perm = fromCamera
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert("Permission needed", fromCamera ? "Camera access is off." : "Photo access is off.");
-        return;
-      }
-      const res = fromCamera
-        ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.7 })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7 });
-      if (res.canceled || !res.assets?.[0]) return;
-      const asset = res.assets[0];
-      const mime = asset.mimeType || "image/jpeg";
-      setBusy("Sealing + uploading photo…");
-      const bytes = await readFileBytes(asset.uri);
-      const blobId = await uploadBlob(bytes, mime);
-      await authorAnnotation({
-        runId: run.id, point: targetPoint, kind: "photo", blobId, mime,
-        text: caption.trim() || undefined,
-      });
-      resetComposer();
-    } catch (e) {
-      Alert.alert("Photo failed", e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(null);
-    }
+    if (await cap.addText(text, targetPoint)) resetComposer();
   };
 
   const pickPhoto = () => {
+    if (!targetPoint) return;
+    const caption = text;
     Alert.alert("Add photo", "Where from?", [
-      { text: "Camera", onPress: () => addPhoto(true) },
-      { text: "Library", onPress: () => addPhoto(false) },
+      { text: "Camera", onPress: async () => { await cap.addPhoto(true, targetPoint, caption); resetComposer(); } },
+      { text: "Library", onPress: async () => { await cap.addPhoto(false, targetPoint, caption); resetComposer(); } },
       { text: "Cancel", style: "cancel" },
     ]);
   };
 
-  const startVoice = async () => {
-    try {
-      const perm = await requestRecordingPermissionsAsync();
-      if (!perm.granted) { Alert.alert("Microphone off", "Enable microphone access to record a voice note."); return; }
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      await recorder.prepareToRecordAsync();
-      recorder.record();
-      recStartRef.current = Date.now();
-      setRecording(true);
-    } catch (e) {
-      Alert.alert("Can't record", e instanceof Error ? e.message : String(e));
-    }
-  };
+  const startVoice = () => { void cap.startVoice(); };
 
   const stopVoice = async () => {
-    if (!targetPoint) { setRecording(false); return; }
-    setRecording(false);
-    setBusy("Sealing + uploading voice…");
-    try {
-      await recorder.stop();
-      const uri = recorder.uri;
-      const dur = Math.max(1, Math.round((Date.now() - recStartRef.current) / 1000));
-      if (!uri) throw new Error("No recording produced");
-      const mime = "audio/m4a";
-      const bytes = await readFileBytes(uri);
-      const blobId = await uploadBlob(bytes, mime);
-      await authorAnnotation({
-        runId: run.id, point: targetPoint, kind: "voice", blobId, mime, dur,
-        text: caption.trim() || undefined,
-      });
-      resetComposer();
-    } catch (e) {
-      Alert.alert("Voice failed", e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(null);
-    }
+    if (!targetPoint) { await cap.cancelVoice(); return; }
+    await cap.stopVoice(targetPoint, text);
+    resetComposer();
   };
 
-  const cancelVoice = async () => {
-    setRecording(false);
-    try { await recorder.stop(); } catch { /* ignore */ }
-  };
+  const cancelVoice = () => { void cap.cancelVoice(); };
 
   const confirmDelete = (a: Annotation) => {
     Alert.alert("Delete annotation?", "This removes it for everyone (an append-only tombstone).", [
@@ -200,8 +124,8 @@ export function RunAnnotations({ run }: { run: { id: string; track: { points: Ge
         style={styles.input}
         placeholder="Note, or a caption for a photo/voice…"
         placeholderTextColor={theme.textTertiary}
-        value={text || caption}
-        onChangeText={(v) => { setText(v); setCaption(v); }}
+        value={text}
+        onChangeText={setText}
         multiline
       />
       <View style={styles.actionRow}>
@@ -244,7 +168,7 @@ export function RunAnnotations({ run }: { run: { id: string; track: { points: Ge
         <View style={styles.recBackdrop}>
           <View style={styles.recCard}>
             <Text style={styles.recDot}>● Recording…</Text>
-            <Text style={styles.recHint}>Speak your note, then stop to seal + upload.</Text>
+            <Text style={styles.recHint}>Speak your note, then stop to save it to this device.</Text>
             <View style={styles.recBtns}>
               <Pressable style={[styles.recBtn, { borderColor: theme.border }]} onPress={cancelVoice}>
                 <Text style={styles.recBtnText}>Cancel</Text>
@@ -308,7 +232,7 @@ function useBlobUri(blobId?: string, mime?: string): { uri: string | null; faile
     if (!blobId) { setLoading(false); return; }
     let alive = true;
     setLoading(true); setFailed(false);
-    fetchBlob(blobId, mime || "").then((u) => {
+    resolveBlobUri(blobId, mime || "").then((u) => {
       if (!alive) return;
       setUri(u);
       setFailed(!u);
@@ -333,7 +257,7 @@ function PhotoThumb({ a, onPress }: { a: Annotation; onPress: () => void }) {
 function PhotoFull({ a }: { a: Annotation }) {
   const { uri, failed, loading } = useBlobUri(a.blobId, a.mime);
   if (loading) return <ActivityIndicator color="#fff" />;
-  if (!uri || failed) return <Text style={styles.photoClose}>Photo unavailable (server unreachable)</Text>;
+  if (!uri || failed) return <Text style={styles.photoClose}>Photo not on this device yet (author is offline)</Text>;
   return <Image source={{ uri }} style={styles.photoFull} resizeMode="contain" />;
 }
 

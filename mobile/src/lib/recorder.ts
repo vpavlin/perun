@@ -76,6 +76,9 @@ class Session {
   /** User preference (settings): auto-pause on stop. Loaded at start; default ON. */
   autoPauseEnabled = true;
   startedAt = 0;
+  /** The run's id, minted at START so annotations authored mid-run attach to the same
+   *  run that later saves (App.makeRun reuses this id). Stable until the next begin(). */
+  runId = "";
   /** Chosen at start — gates outlier speed and picks pace-vs-speed display. */
   sport: Sport = "running";
   private rejectStreak = 0;
@@ -97,6 +100,7 @@ class Session {
 
   begin(sport: Sport) {
     this.points = []; this.rejectStreak = 0; this.startedAt = Date.now();
+    this.runId = "run-" + this.startedAt; // mint here so mid-run annotations attach to it
     this.paused = false; this.autoPaused = false; this.pausedAccumMs = 0; this.pausedAt = 0;
     this.pendingBrk = false; this.lowSince = 0; this.lastFixAt = 0;
     this.sport = sport; this.recording = true; this.emit();
@@ -365,6 +369,8 @@ export interface UseRecorder {
   liveStats: LiveStats;
   permissionDenied: boolean;
   sport: Sport;
+  /** The active/last run's id (minted at start). Use to attach mid-run annotations. */
+  runId: string;
   start: (sport?: Sport) => Promise<boolean>;
   pause: () => void;
   resume: () => void;
@@ -437,6 +443,6 @@ export function useRecorder(): UseRecorder {
 
   return {
     isRecording, isPaused, isAutoPaused, points, liveStats, permissionDenied,
-    sport: session.sport, start, pause, resume, stop,
+    sport: session.sport, runId: session.runId, start, pause, resume, stop,
   };
 }
