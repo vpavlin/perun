@@ -26,6 +26,17 @@ bool RunStore::open(const std::string &path) {
   // Migrate older DBs that predate the gpx column (ignore "duplicate column").
   sqlite3_exec(m_db, "ALTER TABLE runs ADD COLUMN gpx BLOB;", nullptr, nullptr,
                nullptr);
+
+  // Journey annotations — one row per annotation (including delete tombstones),
+  // keyed by the annotation's own id. Added additively; older run DBs get it on
+  // the next open with no run data touched.
+  static const char *kAnnDdl =
+      "CREATE TABLE IF NOT EXISTS annotations ("
+      "  id TEXT PRIMARY KEY,"
+      "  runId TEXT,"
+      "  t INTEGER,"
+      "  json TEXT NOT NULL);";
+  sqlite3_exec(m_db, kAnnDdl, nullptr, nullptr, nullptr);
   return true;
 }
 
@@ -78,6 +89,39 @@ std::string RunStore::getGpx(const std::string &id) const {
     const void *blob = sqlite3_column_blob(st, 0);
     const int n = sqlite3_column_bytes(st, 0);
     if (blob && n > 0) out.assign(static_cast<const char *>(blob), n);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool RunStore::upsertAnnotation(const std::string &id, const std::string &runId,
+                                int64_t t, const std::string &json) {
+  if (!m_db) return false;
+  static const char *kSql =
+      "INSERT OR REPLACE INTO annotations (id, runId, t, json) "
+      "VALUES (?, ?, ?, ?);";
+  sqlite3_stmt *st = nullptr;
+  if (sqlite3_prepare_v2(m_db, kSql, -1, &st, nullptr) != SQLITE_OK)
+    return false;
+  sqlite3_bind_text(st, 1, id.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, runId.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, static_cast<sqlite3_int64>(t));
+  sqlite3_bind_text(st, 4, json.c_str(), -1, SQLITE_TRANSIENT);
+  const bool done = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return done;
+}
+
+std::vector<std::string> RunStore::loadAnnotations() const {
+  std::vector<std::string> out;
+  if (!m_db) return out;
+  static const char *kSql = "SELECT json FROM annotations ORDER BY t ASC;";
+  sqlite3_stmt *st = nullptr;
+  if (sqlite3_prepare_v2(m_db, kSql, -1, &st, nullptr) != SQLITE_OK)
+    return out;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    const unsigned char *t = sqlite3_column_text(st, 0);
+    if (t) out.emplace_back(reinterpret_cast<const char *>(t));
   }
   sqlite3_finalize(st);
   return out;

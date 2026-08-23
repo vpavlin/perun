@@ -21,6 +21,19 @@ class PerunAnalytics
     // [{ "id","name","startTs","summary":{…},"splits":[…] }, …]
     PROP(QString runsJson="[]" READONLY)
 
+    // JSON object mapping runId -> array of that run's annotations (photos /
+    // voice notes / text comments pinned to a point), authored on mobile and
+    // synced as ANNOTATION envelopes. Chronological by point time `t`, deletes
+    // applied (kind:"delete" tombstones its target). Shape per entry mirrors the
+    // mobile `a` object: { id, runId, lat, lon, ele, t, createdAt, author, kind,
+    // text?, blobId?, mime?, dur? }. Auto-syncs like runsJson.
+    PROP(QString annotationsJson="{}" READONLY)
+
+    // Blob-server base URL currently in effect (photos/voice are fetched from
+    // <blobServer>/blob/<blobId>). Empty until configured (env PERUN_BLOB_URL or
+    // setBlobServer). The bearer token is never surfaced here.
+    PROP(QString blobServer="" READONLY)
+
     // Publish a synthetic run (as gzipped GPX, chunked) over Logos Delivery —
     // stand-in for the mobile app. Returns "" on success, or an error.
     SLOT(QString publishSampleRun())
@@ -31,6 +44,35 @@ class PerunAnalytics
 
     // Write the run out as a .gpx file; returns the file path ("" on error).
     SLOT(QString exportGpx(QString runId))
+
+    // Configure the blob server used for photo/voice media. url = base URL (e.g.
+    // "https://host:8090"), token = optional bearer (uploads only; reads are
+    // open). Persisted. Pass "" for token to leave it unset. Returns "". The URL
+    // is reflected back via the blobServer PROP.
+    SLOT(QString configureBlobServer(QString url, QString token))
+
+    // Fetch + decrypt the media blob `blobId` (photo/voice) for display. If it is
+    // already cached on disk (inside the view sandbox) the file:// URL is returned
+    // synchronously; otherwise "" is returned and the fetch runs async, ending in
+    // mediaReady(blobId, fileUrl) or mediaFailed(blobId, error). `mime` picks the
+    // cached file's extension. Bytes on the server are ciphertext (sealed with the
+    // run's household key); we GET them and open() with our pairing identity.
+    SLOT(QString loadMedia(QString blobId, QString mime))
+
+    // Author a text annotation from the desktop: seal an ANNOTATION{kind:"text"}
+    // envelope and send it over the same channel as run CHUNKs, then apply it
+    // locally. ele may be NaN/unset (pass 0 with eleValid=false to omit). Returns
+    // "" on success or an error string.
+    SLOT(QString addTextAnnotation(QString runId, double lat, double lon,
+                                   double ele, bool eleValid, double t,
+                                   QString text))
+
+    // Async result of loadMedia: the decrypted media is cached at fileUrl
+    // (file:// inside the sandbox, ready for Image/MediaPlayer).
+    SIGNAL(mediaReady(QString blobId, QString fileUrl))
+    // loadMedia could not produce the media (server unreachable, bad blob, or
+    // decrypt failure) — the caller shows a placeholder.
+    SIGNAL(mediaFailed(QString blobId, QString error))
 
     // Generate a NEW pairing secret (unpairs every currently-paired phone) and
     // resubscribe to the new derived topic. Returns "" on success, else an error.

@@ -1,5 +1,6 @@
 #include "perun_analytics_backend.h"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
@@ -14,10 +15,12 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QUrl>
+#include <QUuid>
 #include <QVariantList>
 
 #include "logos_sdk.h"
@@ -163,6 +166,45 @@ void PerunAnalyticsBackend::openStoreAndLoad() {
   logEvent("loaded " + std::to_string(m_runs.size()) + " persisted runs");
   if (!m_runs.isEmpty())
     publishRuns();
+
+  loadAnnotations();
+  loadBlobConfig();
+}
+
+// Blob-server config: persisted <dataDir>/blob.json wins; otherwise fall back to
+// env (PERUN_BLOB_URL / PERUN_BLOB_TOKEN). setBlobServer() rewrites the file.
+void PerunAnalyticsBackend::loadBlobConfig() {
+  const QString path = m_dataDir + QStringLiteral("/blob.json");
+  QFile f(path);
+  if (f.open(QIODevice::ReadOnly)) {
+    const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+    f.close();
+    m_blobUrl = o.value(QStringLiteral("url")).toString();
+    m_blobToken = o.value(QStringLiteral("token")).toString();
+  }
+  if (m_blobUrl.isEmpty() && qEnvironmentVariableIsSet("PERUN_BLOB_URL"))
+    m_blobUrl = qEnvironmentVariable("PERUN_BLOB_URL");
+  if (m_blobToken.isEmpty() && qEnvironmentVariableIsSet("PERUN_BLOB_TOKEN"))
+    m_blobToken = qEnvironmentVariable("PERUN_BLOB_TOKEN");
+  // Normalise: drop any trailing slash so we can append "/blob/<id>" cleanly.
+  while (m_blobUrl.endsWith('/'))
+    m_blobUrl.chop(1);
+  setBlobServer(m_blobUrl);
+  if (!m_blobUrl.isEmpty())
+    logEvent("blob server = " + m_blobUrl.toStdString());
+}
+
+void PerunAnalyticsBackend::loadAnnotations() {
+  int n = 0;
+  for (const std::string &j : m_store.loadAnnotations()) {
+    const QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(j));
+    if (!doc.isObject())
+      continue;
+    if (applyAnnotation(doc.object(), /*persist=*/false))
+      ++n;
+  }
+  logEvent("loaded " + std::to_string(n) + " persisted annotations");
+  publishAnnotations();
 }
 
 // Recover + dispatch one sealed CHUNK envelope, regardless of transport or
@@ -187,7 +229,19 @@ void PerunAnalyticsBackend::ingestSealed(const QByteArray &raw) {
     if (err.error != QJsonParseError::NoError || !doc.isObject())
       return;
     const QJsonObject env = doc.object();
-    if (env.value(QStringLiteral("type")).toString() != QLatin1String("CHUNK"))
+    const QString etype = env.value(QStringLiteral("type")).toString();
+
+    // ANNOTATION: photo / voice / text / delete pinned to a journey point,
+    // authored on mobile and synced as its own sealed envelope alongside CHUNKs.
+    // The payload is the `a` object (shared contract); fold it into the store.
+    if (etype == QLatin1String("ANNOTATION")) {
+      const QJsonObject a = env.value(QStringLiteral("a")).toObject();
+      if (applyAnnotation(a, /*persist=*/true))
+        publishAnnotations();
+      return;
+    }
+
+    if (etype != QLatin1String("CHUNK"))
       return;
 
     const QString id = env.value(QStringLiteral("id")).toString();
@@ -419,6 +473,243 @@ void PerunAnalyticsBackend::addRun(const QJsonObject &run,
 void PerunAnalyticsBackend::publishRuns() {
   setRunsJson(QString::fromUtf8(
       QJsonDocument(m_runs).toJson(QJsonDocument::Compact)));
+}
+
+// Fold one annotation `a` object in. Dedup by a.id; kind:"delete" removes its
+// target (and remembers it, so a delete that arrives before its target still
+// wins). Order-independent, so live ingest and load share this one path.
+bool PerunAnalyticsBackend::applyAnnotation(const QJsonObject &a, bool persist) {
+  const QString id = a.value(QStringLiteral("id")).toString();
+  const QString runId = a.value(QStringLiteral("runId")).toString();
+  const QString kind = a.value(QStringLiteral("kind")).toString();
+  if (id.isEmpty() || runId.isEmpty())
+    return false;
+
+  auto doPersist = [&]() {
+    if (!persist)
+      return;
+    const QByteArray j = QJsonDocument(a).toJson(QJsonDocument::Compact);
+    m_store.upsertAnnotation(
+        id.toStdString(), runId.toStdString(),
+        static_cast<int64_t>(a.value(QStringLiteral("t")).toDouble()),
+        std::string(j.constData(), static_cast<size_t>(j.size())));
+  };
+
+  if (kind == QLatin1String("delete")) {
+    const QString target = a.value(QStringLiteral("target")).toString();
+    if (target.isEmpty())
+      return false;
+    // Record the tombstone (blocks a later-arriving target) and drop it now.
+    QSet<QString> &dels = m_annDeleted[runId];
+    const bool tombNew = !dels.contains(target);
+    dels.insert(target);
+    const bool had = m_annotations[runId].remove(target) > 0;
+    doPersist();
+    return tombNew || had;
+  }
+
+  // A non-delete whose id is already tombstoned stays suppressed.
+  if (m_annDeleted.value(runId).contains(id))
+    return false;
+  // Dedup by id (annotations are immutable once authored).
+  if (m_annotations.value(runId).contains(id))
+    return false;
+  m_annotations[runId].insert(id, a);
+  doPersist();
+  return true;
+}
+
+// runId -> [annotations sorted by point time t]. Auto-syncs to QML like runsJson.
+void PerunAnalyticsBackend::publishAnnotations() {
+  QJsonObject out;
+  for (auto it = m_annotations.constBegin(); it != m_annotations.constEnd(); ++it) {
+    const QMap<QString, QJsonObject> &byId = it.value();
+    if (byId.isEmpty())
+      continue;
+    QList<QJsonObject> list = byId.values();
+    std::sort(list.begin(), list.end(), [](const QJsonObject &x, const QJsonObject &y) {
+      return x.value(QStringLiteral("t")).toDouble() <
+             y.value(QStringLiteral("t")).toDouble();
+    });
+    QJsonArray arr;
+    for (const QJsonObject &o : list)
+      arr.append(o);
+    out.insert(it.key(), arr);
+  }
+  setAnnotationsJson(QString::fromUtf8(
+      QJsonDocument(out).toJson(QJsonDocument::Compact)));
+}
+
+QString PerunAnalyticsBackend::configureBlobServer(QString url, QString token) {
+  while (url.endsWith('/'))
+    url.chop(1);
+  m_blobUrl = url;
+  m_blobToken = token;
+  // Persist both; token stays out of the surfaced PROP (setBlobServer PROP below).
+  const QJsonObject o{{"url", m_blobUrl}, {"token", m_blobToken}};
+  QSaveFile out(m_dataDir + QStringLiteral("/blob.json"));
+  if (out.open(QIODevice::WriteOnly)) {
+    out.write(QJsonDocument(o).toJson(QJsonDocument::Compact));
+    out.commit();
+    QFile::setPermissions(out.fileName(),
+                          QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+  }
+  setBlobServer(m_blobUrl); // update the READONLY PROP (URL only)
+  logEvent("blob server set to " + m_blobUrl.toStdString());
+  return QString();
+}
+
+// Media cache dir: inside the view sandbox (the tile root) when known, so
+// QQuickImage / MediaPlayer can read the decrypted file:// off disk. Falls back
+// to the data dir (works for the backend, but sandbox-blocked for the view).
+QString PerunAnalyticsBackend::mediaDir() const {
+  return (m_tileRoot.isEmpty() ? m_dataDir : m_tileRoot) +
+         QStringLiteral("/media");
+}
+
+namespace {
+// Extension for the decrypted media file from its declared mime.
+QString extForMime(const QString &mime) {
+  const QString m = mime.toLower();
+  if (m.contains(QLatin1String("jpeg")) || m.contains(QLatin1String("jpg")))
+    return QStringLiteral("jpg");
+  if (m.contains(QLatin1String("png")))
+    return QStringLiteral("png");
+  if (m.contains(QLatin1String("webp")))
+    return QStringLiteral("webp");
+  if (m.contains(QLatin1String("m4a")) || m.contains(QLatin1String("mp4")) ||
+      m.contains(QLatin1String("aac")))
+    return QStringLiteral("m4a");
+  if (m.contains(QLatin1String("mpeg")) || m.contains(QLatin1String("mp3")))
+    return QStringLiteral("mp3");
+  if (m.contains(QLatin1String("ogg")) || m.contains(QLatin1String("opus")))
+    return QStringLiteral("ogg");
+  if (m.contains(QLatin1String("wav")))
+    return QStringLiteral("wav");
+  return QStringLiteral("bin");
+}
+} // namespace
+
+QString PerunAnalyticsBackend::loadMedia(QString blobId, QString mime) {
+  // Only 64-hex sha256 ids are valid blob ids (also keeps the path safe).
+  static const QRegularExpression kHex(QStringLiteral("^[0-9a-f]{64}$"));
+  if (!kHex.match(blobId).hasMatch())
+    return QString();
+
+  const QString path =
+      mediaDir() + QStringLiteral("/") + blobId + QStringLiteral(".") + extForMime(mime);
+  const QFileInfo cached(path);
+  if (cached.exists() && cached.size() > 0)
+    return QUrl::fromLocalFile(path).toString(); // synchronous cache hit
+
+  if (m_blobUrl.isEmpty()) {
+    emit mediaFailed(blobId, QStringLiteral("blob server not configured"));
+    return QString();
+  }
+  if (!m_mediaInFlight.contains(blobId)) {
+    m_mediaInFlight.insert(blobId);
+    fetchAndDecryptBlob(blobId, mime);
+  }
+  return QString(); // async — result via mediaReady/mediaFailed
+}
+
+// GET the CIPHERTEXT blob, open() it with the run's pairing identity (the same
+// identity/topic that opened this run's CHUNKs), cache the plaintext, emit.
+void PerunAnalyticsBackend::fetchAndDecryptBlob(const QString &blobId,
+                                                const QString &mime) {
+  if (!m_net)
+    m_net = new QNetworkAccessManager(this);
+  const QString url = m_blobUrl + QStringLiteral("/blob/") + blobId;
+  QNetworkRequest req{QUrl(url)};
+  req.setHeader(QNetworkRequest::UserAgentHeader,
+                QString::fromLatin1(kTileUserAgent));
+  req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                   QNetworkRequest::NoLessSafeRedirectPolicy);
+  if (!m_blobToken.isEmpty())
+    req.setRawHeader("Authorization",
+                     ("Bearer " + m_blobToken).toUtf8());
+
+  QNetworkReply *reply = m_net->get(req);
+  QObject::connect(reply, &QNetworkReply::finished, this, [this, reply, blobId, mime]() {
+    reply->deleteLater();
+    m_mediaInFlight.remove(blobId);
+    if (reply->error() != QNetworkReply::NoError) {
+      logEvent("blob GET failed " + blobId.toStdString() + ": " +
+               reply->errorString().toStdString());
+      emit mediaFailed(blobId, reply->errorString());
+      return;
+    }
+    const QByteArray sealed = reply->readAll();
+    bool ok = false;
+    const perun::Bytes pt =
+        perun::open(m_id, toBytes(sealed), m_topic.toStdString(), &ok);
+    if (!ok) {
+      logEvent("blob decrypt failed " + blobId.toStdString());
+      emit mediaFailed(blobId, QStringLiteral("decrypt failed"));
+      return;
+    }
+    const QString dir = mediaDir();
+    if (m_tileRoot.isEmpty())
+      logEvent("media root unset — decrypted media will be sandbox-blocked");
+    if (!QDir().mkpath(dir)) {
+      emit mediaFailed(blobId, QStringLiteral("cannot create media dir"));
+      return;
+    }
+    const QString path =
+        dir + QStringLiteral("/") + blobId + QStringLiteral(".") + extForMime(mime);
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly) || f.write(fromBytes(pt)) < 0 || !f.commit()) {
+      emit mediaFailed(blobId, QStringLiteral("cannot write media cache"));
+      return;
+    }
+    logEvent("cached decrypted media " + blobId.toStdString() + " (" +
+             std::to_string(pt.size()) + "B)");
+    emit mediaReady(blobId, QUrl::fromLocalFile(path).toString());
+  });
+}
+
+QString PerunAnalyticsBackend::addTextAnnotation(QString runId, double lat,
+                                                 double lon, double ele,
+                                                 bool eleValid, double t,
+                                                 QString text) {
+  if (!m_nodeReady)
+    return QStringLiteral("Node not ready");
+  if (runId.isEmpty() || text.trimmed().isEmpty())
+    return QStringLiteral("runId and text required");
+
+  const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  const qint64 created = nowMs();
+  QJsonObject a{
+      {"id", id},
+      {"runId", runId},
+      {"lat", lat},
+      {"lon", lon},
+      {"ele", eleValid ? QJsonValue(ele) : QJsonValue(QJsonValue::Null)},
+      {"t", t > 0 ? t : static_cast<double>(created)},
+      {"createdAt", static_cast<double>(created)},
+      {"author", QStringLiteral("perun-desktop")},
+      {"kind", "text"},
+      {"text", text}};
+  const QJsonObject env{{"v", 1}, {"type", "ANNOTATION"}, {"a", a}};
+
+  // Deterministic nonce (ADR 0011): the annotation id uniquely identifies this
+  // immutable payload, so re-sending re-seals byte-identical and the store dedups.
+  const std::string sealId = "ann|" + id.toStdString();
+  const QByteArray sealed = fromBytes(perun::seal(
+      m_id, sealId, toBytes(QJsonDocument(env).toJson(QJsonDocument::Compact)),
+      m_topic.toStdString()));
+  const QString err =
+      modules().loam_core.sendSealed(m_topic, QString::fromLatin1(sealed.toBase64()));
+  if (!err.isEmpty()) {
+    logEvent("send annotation failed: " + err.toStdString());
+    return err;
+  }
+  // Local echo — the relay won't loop our own message back.
+  if (applyAnnotation(a, /*persist=*/true))
+    publishAnnotations();
+  logEvent("authored text annotation " + id.toStdString() + " for " +
+           runId.toStdString());
+  return QString();
 }
 
 QString PerunAnalyticsBackend::trackJson(QString runId) {

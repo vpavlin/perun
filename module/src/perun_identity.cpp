@@ -267,6 +267,24 @@ int main() {
   Bytes bad = open(id, wire, "/perun/1/wrong/proto", &ok);
   check("aad-bind rejects", !ok);
 
+  // Sealed-blob (photo/voice) E2E: the desktop annotation-media path is exactly
+  // open(id, GET(<server>/blob/<blobId>), topic). Mobile seals the file bytes
+  // with the run key (sealId = sha256hex(plaintext)); we open() the ciphertext
+  // back to the original bytes with the SAME identity/topic used for CHUNKs.
+  {
+    Bytes fileBytes = {0xff, 0xd8, 0xff, 0xe0, 'J', 'P', 'E', 'G'}; // faux jpeg header
+    Bytes sealedBlob = seal(id, "sha256hex-of-plaintext", fileBytes, topic);
+    bool bok = false;
+    Bytes plain = open(id, sealedBlob, topic, &bok);
+    check("sealed-blob open roundtrip", bok && plain == fileBytes);
+    // A blob sealed for a DIFFERENT pairing must not open with ours.
+    Bytes S2(32); for (int i = 0; i < 32; i++) S2[i] = static_cast<uint8_t>(255 - i);
+    Identity other = deriveIdentity(S2);
+    Bytes foreign = seal(other, "x", fileBytes, topicFor(other, 0));
+    open(id, foreign, topic, &bok);
+    check("sealed-blob rejects foreign", !bok);
+  }
+
   // base32 code round-trip
   check("base32 roundtrip", decodeSecret(encodeSecret(S)) == S);
   std::printf("pairingUri = %s\n", pairingUri(S).c_str());

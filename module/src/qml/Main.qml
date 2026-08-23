@@ -23,6 +23,69 @@ Item {
     // Decoded points for the selected run's route map (fetched on demand).
     property var trackPoints: []
 
+    // ---- Journey annotations (photos / voice / text pinned to a point) ----
+    // Backend publishes { runId: [ann, …] } as a PROP; pick the selected run's.
+    readonly property var allAnnotations: backend ? JSON.parse(backend.annotationsJson || "{}") : ({})
+    readonly property var annotations: (selectedRun && allAnnotations[selectedRun.id]) ? allAnnotations[selectedRun.id] : []
+    // Index into `annotations` linking a tapped map marker to the list (and back).
+    property int selectedAnnotation: -1
+    // blobId -> decrypted file:// url, or "error" / "loading". New object ref on
+    // each change so bindings re-evaluate (QML can't see in-place mutation).
+    property var mediaUrls: ({})
+
+    onSelectedRunChanged: root.selectedAnnotation = -1
+
+    function setMedia(blobId, val) {
+        var m = {};
+        for (var k in root.mediaUrls) m[k] = root.mediaUrls[k];
+        m[blobId] = val;
+        root.mediaUrls = m;
+    }
+    // Kick a fetch+decrypt for a blob (idempotent). A cache hit resolves the
+    // watch synchronously; otherwise the backend emits mediaReady/mediaFailed.
+    function ensureMedia(blobId, mime) {
+        if (!backend || !blobId) return;
+        var cur = root.mediaUrls[blobId];
+        if (cur && cur !== "error") return; // have it (or in flight as a url)
+        root.setMedia(blobId, "loading");
+        logos.watch(backend.loadMedia(blobId, mime || ""),
+            function (url) { if (url && url.length > 0) root.setMedia(blobId, url); },
+            function (e) { /* async — result arrives via the signals below */ });
+    }
+    function iconForKind(k) {
+        return k === "photo" ? "📷" : (k === "voice" ? "🎙️" : "💬");
+    }
+    // Load (if needed) then play a voice blob. If the media is still fetching we
+    // just kick the fetch; the user taps ▶ again once it is ready.
+    function playVoice(blobId, mime) {
+        var u = root.mediaUrls[blobId];
+        if (!u || u === "error") { root.ensureMedia(blobId, mime); return; }
+        if (u === "loading") return;
+        if (voicePlayerLoader.status === Loader.Ready && voicePlayerLoader.item) {
+            voicePlayerLoader.item.play(u);
+        } else {
+            voicePlayerLoader.pendingUrl = u;
+            voicePlayerLoader.active = true;
+        }
+    }
+
+    // Isolated audio player — QtMultimedia is imported only inside VoicePlayer.qml
+    // so a runtime without it degrades this one control instead of failing the
+    // whole view to load. Instantiated lazily on first playback.
+    Loader {
+        id: voicePlayerLoader
+        active: false
+        source: "VoicePlayer.qml"
+        property string pendingUrl: ""
+        onStatusChanged: {
+            if (status === Loader.Ready && item && pendingUrl.length > 0) {
+                item.play(pendingUrl); pendingUrl = "";
+            } else if (status === Loader.Error) {
+                console.log("[perun] VoicePlayer unavailable (no QtMultimedia?)");
+            }
+        }
+    }
+
     // True once setTileRoot has ACTUALLY landed on the backend. QtRO SLOT calls
     // from QML are async (they return a pending handle, not the value), so
     // setTileRoot and ensureTile race: without this gate a tile can be fetched
@@ -77,6 +140,12 @@ Item {
         ignoreUnknownSignals: true
         function onRunsJsonChanged() { root.applyTileRoot(); }
         function onStatusChanged() { root.applyTileRoot(); }
+        // Async media results from loadMedia (photo/voice fetch + decrypt).
+        function onMediaReady(blobId, fileUrl) { root.setMedia(blobId, fileUrl); }
+        function onMediaFailed(blobId, error) {
+            console.log("[perun] media failed", blobId, error);
+            root.setMedia(blobId, "error");
+        }
     }
 
     function fetchTrack() {
@@ -395,6 +464,13 @@ Item {
                         var r = c * Math.PI / 180;
                         return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2;
                     }
+                    // lat/lon -> pixel in this map's current Mercator frame (same
+                    // transform as the track), for placing annotation markers.
+                    function project(lat, lon) {
+                        if (!layout) return Qt.point(-9999, -9999);
+                        return Qt.point(layout.originX + mercX(lon) * layout.scale,
+                                        layout.originY + mercY(lat) * layout.scale);
+                    }
 
                     function rebuild() {
                         var pts = root.trackPoints;
@@ -568,6 +644,38 @@ Item {
                         font.pixelSize: 12
                     }
 
+                    // Annotation markers — a pin per annotation at its lat/lon, in
+                    // the same Mercator frame as the track. Tapping one selects the
+                    // matching list item (and vice-versa via selectedAnnotation).
+                    Repeater {
+                        model: root.annotations
+                        delegate: Rectangle {
+                            // Reference mapBox.layout so the position re-evaluates
+                            // when the frame changes (pan/zoom/rebuild).
+                            property point pp: (mapBox.layout, mapBox.project(modelData.lat, modelData.lon))
+                            visible: mapBox.layout !== null
+                            width: sel ? 22 : 18
+                            height: width
+                            radius: width / 2
+                            property bool sel: index === root.selectedAnnotation
+                            x: pp.x - width / 2
+                            y: pp.y - height / 2
+                            color: sel ? Theme.palette.primary : Theme.palette.backgroundElevated
+                            border.width: 2
+                            border.color: Theme.palette.primary
+                            z: sel ? 2 : 1
+                            LogosText {
+                                anchors.centerIn: parent
+                                text: root.iconForKind(modelData.kind)
+                                font.pixelSize: parent.sel ? 12 : 10
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: root.selectedAnnotation = index
+                            }
+                        }
+                    }
+
                     // OSM attribution — mandatory whenever tiles are drawn.
                     Rectangle {
                         visible: mapBox.hasTiles
@@ -584,6 +692,168 @@ Item {
                             text: "© OpenStreetMap contributors"
                             color: Theme.palette.text
                             font.pixelSize: 9
+                        }
+                    }
+                }
+
+                // ---- Journey annotations: photos / voice notes / text comments
+                //      the athlete pinned to a point, synced from mobile. ----
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacing.small
+                    LogosText {
+                        text: "HIGHLIGHTS  ·  " + root.annotations.length
+                        color: Theme.palette.textTertiary; font.pixelSize: 11
+                    }
+                    Item { Layout.fillWidth: true }
+                    // Desktop text authoring: pin a note to the run's start point.
+                    LogosText {
+                        text: annCompose.visible ? "" : "+ Note"
+                        color: Theme.palette.primary; font.pixelSize: 12
+                        visible: root.ready && root.selectedRun !== null && !annCompose.visible
+                        MouseArea { anchors.fill: parent; onClicked: annCompose.visible = true }
+                    }
+                }
+                // Compose row (hidden until "+ Note"). Authors an ANNOTATION{text}
+                // over the same sealed channel as CHUNKs, pinned to the first GPS
+                // point (or 0,0 if the track has not loaded).
+                RowLayout {
+                    id: annCompose
+                    visible: false
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing.small
+                    TextField {
+                        id: annField
+                        Layout.fillWidth: true
+                        placeholderText: "Add a note to this run…"
+                        color: Theme.palette.text
+                        font.pixelSize: 13
+                        background: Rectangle {
+                            color: Theme.palette.backgroundElevated
+                            radius: Theme.spacing.radiusSmall
+                            border.color: Theme.palette.borderHairline; border.width: 1
+                        }
+                        onAccepted: annCompose.submit()
+                    }
+                    LogosButton {
+                        text: "Add"
+                        enabled: annField.text.trim().length > 0
+                        onClicked: annCompose.submit()
+                    }
+                    LogosButton {
+                        text: "Cancel"
+                        onClicked: { annField.text = ""; annCompose.visible = false }
+                    }
+                    function submit() {
+                        if (!root.backend || !root.selectedRun) return;
+                        var txt = annField.text.trim();
+                        if (txt.length === 0) return;
+                        var p = (root.trackPoints && root.trackPoints.length > 0) ? root.trackPoints[0] : null;
+                        var lat = p ? p.lat : 0, lon = p ? p.lon : 0;
+                        var hasEle = p && p.altValid;
+                        var ele = (p && p.altValid) ? p.alt : 0;
+                        var t = p ? p.t : 0;
+                        logos.watch(root.backend.addTextAnnotation(root.selectedRun.id, lat, lon, ele, hasEle ? true : false, t, txt),
+                            function () { annField.text = ""; annCompose.visible = false; },
+                            function (e) { console.log("[perun] addTextAnnotation error:", e); });
+                    }
+                }
+                ListView {
+                    id: annList
+                    visible: root.annotations.length > 0
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.min(3, root.annotations.length) * 64
+                    clip: true
+                    spacing: Theme.spacing.small
+                    model: root.annotations
+                    currentIndex: root.selectedAnnotation
+                    delegate: Rectangle {
+                        width: annList.width
+                        height: 58
+                        radius: Theme.spacing.radiusSmall
+                        color: index === root.selectedAnnotation ? Theme.palette.overlayOrange : Theme.palette.backgroundElevated
+                        border.width: index === root.selectedAnnotation ? 1 : 0
+                        border.color: Theme.palette.primary
+                        MouseArea { anchors.fill: parent; onClicked: root.selectedAnnotation = index }
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: Theme.spacing.small
+                            spacing: Theme.spacing.medium
+
+                            // Photo thumbnail (decrypted on demand) or a kind icon.
+                            Item {
+                                Layout.preferredWidth: 42
+                                Layout.preferredHeight: 42
+                                property string blobUrl: modelData.blobId ? (root.mediaUrls[modelData.blobId] || "") : ""
+                                Component.onCompleted: if (modelData.kind === "photo" && modelData.blobId) root.ensureMedia(modelData.blobId, modelData.mime)
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: Theme.spacing.radiusSmall
+                                    color: Theme.palette.backgroundSecondary
+                                    LogosText {
+                                        anchors.centerIn: parent
+                                        text: root.iconForKind(modelData.kind)
+                                        font.pixelSize: 18
+                                        visible: thumb.status !== Image.Ready
+                                    }
+                                    Image {
+                                        id: thumb
+                                        anchors.fill: parent
+                                        fillMode: Image.PreserveAspectCrop
+                                        asynchronous: true
+                                        cache: false
+                                        visible: status === Image.Ready
+                                        source: (modelData.kind === "photo" && parent.parent.blobUrl && parent.parent.blobUrl !== "error" && parent.parent.blobUrl !== "loading") ? parent.parent.blobUrl : ""
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        enabled: modelData.kind === "photo"
+                                        onClicked: {
+                                            root.selectedAnnotation = index;
+                                            if (modelData.blobId) photoView.show(modelData);
+                                        }
+                                    }
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                LogosText {
+                                    Layout.fillWidth: true
+                                    text: modelData.text && modelData.text.length > 0
+                                          ? modelData.text
+                                          : (modelData.kind === "photo" ? "Photo"
+                                             : (modelData.kind === "voice" ? "Voice note" : "Note"))
+                                    color: Theme.palette.text; font.pixelSize: 13
+                                    elide: Text.ElideRight
+                                }
+                                LogosText {
+                                    text: {
+                                        var d = new Date(modelData.t || modelData.createdAt || 0);
+                                        var hh = d.getHours(), mm = d.getMinutes();
+                                        var stamp = (hh < 10 ? "0" + hh : hh) + ":" + (mm < 10 ? "0" + mm : mm);
+                                        var extra = modelData.kind === "voice" && modelData.dur ? "  ·  " + Math.round(modelData.dur) + "s" : "";
+                                        return root.iconForKind(modelData.kind) + "  " + stamp + extra;
+                                    }
+                                    color: Theme.palette.textTertiary; font.pixelSize: 11
+                                }
+                            }
+
+                            // Voice: load + play through the isolated VoicePlayer
+                            // (QtMultimedia lives in that file, so if the runtime
+                            // lacks it only this control degrades, not the view).
+                            LogosButton {
+                                visible: modelData.kind === "voice"
+                                text: {
+                                    var u = modelData.blobId ? root.mediaUrls[modelData.blobId] : "";
+                                    return u === "loading" ? "…" : (u === "error" ? "retry" : "▶");
+                                }
+                                onClicked: {
+                                    root.selectedAnnotation = index;
+                                    if (modelData.blobId) root.playVoice(modelData.blobId, modelData.mime);
+                                }
+                            }
                         }
                     }
                 }
@@ -856,6 +1126,68 @@ Item {
                 text: "Pair phone"
                 enabled: root.backend !== null
                 onClicked: pairDialog.open()
+            }
+        }
+    }
+
+    // ---- Photo viewer: full-size decrypted image + its caption ----
+    Popup {
+        id: photoView
+        anchors.centerIn: Overlay.overlay
+        modal: true
+        padding: Theme.spacing.large
+        property var ann: null
+        property string blobId: ann && ann.blobId ? ann.blobId : ""
+        property string url: blobId ? (root.mediaUrls[blobId] || "") : ""
+        // `show` (not `open`) so we don't shadow Popup's built-in open().
+        function show(a) { photoView.ann = a; if (a && a.blobId) root.ensureMedia(a.blobId, a.mime); photoView.open(); }
+        background: Rectangle {
+            color: Theme.palette.backgroundInset
+            radius: Theme.spacing.radiusMedium
+            border.color: Theme.palette.borderHairline; border.width: 1
+        }
+        ColumnLayout {
+            width: 460
+            spacing: Theme.spacing.medium
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 340
+                radius: Theme.spacing.radiusSmall
+                color: Theme.palette.backgroundElevated
+                clip: true
+                Image {
+                    anchors.fill: parent
+                    anchors.margins: 2
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    cache: false
+                    source: (photoView.url && photoView.url !== "error" && photoView.url !== "loading") ? photoView.url : ""
+                    visible: status === Image.Ready
+                }
+                LogosText {
+                    anchors.centerIn: parent
+                    visible: photoView.url === "" || photoView.url === "loading"
+                    text: "loading photo…"
+                    color: Theme.palette.textTertiary; font.pixelSize: 13
+                }
+                LogosText {
+                    anchors.centerIn: parent
+                    visible: photoView.url === "error"
+                    text: "Photo unavailable\n(blob server unreachable)"
+                    horizontalAlignment: Text.AlignHCenter
+                    color: Theme.palette.warning; font.pixelSize: 13
+                }
+            }
+            LogosText {
+                Layout.fillWidth: true
+                visible: photoView.ann && photoView.ann.text && photoView.ann.text.length > 0
+                text: photoView.ann ? (photoView.ann.text || "") : ""
+                color: Theme.palette.text; font.pixelSize: 13; wrapMode: Text.Wrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                LogosButton { text: "Close"; onClicked: photoView.close() }
             }
         }
     }

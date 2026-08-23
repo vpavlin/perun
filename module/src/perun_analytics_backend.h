@@ -1,9 +1,11 @@
 #pragma once
 
 #include <QByteArray>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QMap>
+#include <QSet>
 #include <QString>
 
 #include "rep_perun_analytics_source.h"
@@ -44,6 +46,15 @@ public:
   // In-process QR encode (vendored qrcodegen) → JSON matrix for the QML.
   QString qrMatrix(QString text) override;
 
+  // Set + persist the blob-server URL (+ optional bearer token) for media fetch.
+  QString configureBlobServer(QString url, QString token) override;
+  // Fetch + decrypt a media blob; returns a file:// URL if cached, else "" and
+  // emits mediaReady/mediaFailed. See perun_analytics.rep.
+  QString loadMedia(QString blobId, QString mime) override;
+  // Author + send a text annotation from the desktop.
+  QString addTextAnnotation(QString runId, double lat, double lon, double ele,
+                            bool eleValid, double t, QString text) override;
+
 protected:
   void onContextReady() override;
 
@@ -68,6 +79,20 @@ private:
   void addRun(const QJsonObject &run, const QByteArray &gz);
   void publishRuns();
 
+  // ---- Annotations ----
+  // Fold one annotation `a` object into the in-memory collection: dedup by a.id,
+  // apply kind:"delete" tombstones (order-independent). Persists when persist is
+  // true. Returns true if the set changed. Used by both live ingest and load.
+  bool applyAnnotation(const QJsonObject &a, bool persist);
+  void loadAnnotations();
+  void publishAnnotations();
+  void loadBlobConfig();
+  // GET <blobServer>/blob/<blobId> async, open() the sealed bytes, cache the
+  // plaintext under the sandbox media dir, then emit mediaReady/mediaFailed.
+  void fetchAndDecryptBlob(const QString &blobId, const QString &mime);
+  // Directory (inside the view sandbox when tileRoot is set) for decrypted media.
+  QString mediaDir() const;
+
   QJsonArray m_runs;
   bool m_nodeReady = false;
   perun::RunStore m_store;
@@ -90,4 +115,17 @@ private:
     QMap<int, QByteArray> parts;
   };
   QMap<QString, ChunkBuf> m_chunks;
+
+  // Annotations: runId -> (annotationId -> `a` object), plus per-run tombstones
+  // (targets of a kind:"delete") so a delete arriving before its target still
+  // suppresses it. Both persisted via RunStore.
+  QMap<QString, QMap<QString, QJsonObject>> m_annotations;
+  QMap<QString, QSet<QString>> m_annDeleted;
+
+  // Blob server for photo/voice media (empty = unconfigured). Token is upload-
+  // only; reads are open, but we send it too if set.
+  QString m_blobUrl;
+  QString m_blobToken;
+  // In-flight media fetches, so a repeated loadMedia doesn't double-GET.
+  QSet<QString> m_mediaInFlight;
 };

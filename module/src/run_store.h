@@ -30,6 +30,16 @@ public:
   // Gzipped GPX bytes for one run (empty if unknown).
   std::string getGpx(const std::string &id) const;
 
+  // ---- Journey annotations (photos / voice / text / delete), keyed by the
+  // annotation's own id. `json` is the full mobile `a` object; a kind:"delete"
+  // row is stored the same way (its own id, target inside the json). t = the
+  // annotated point's epoch-ms, for chronological ordering. ----
+  bool upsertAnnotation(const std::string &id, const std::string &runId,
+                        int64_t t, const std::string &json);
+  // All annotation JSON objects (every run), oldest point-time first. The caller
+  // folds dedup + delete tombstones (order-independent).
+  std::vector<std::string> loadAnnotations() const;
+
 private:
   sqlite3 *m_db = nullptr;
 };
