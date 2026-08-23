@@ -34,6 +34,12 @@ class PerunAnalytics
     // setBlobServer). The bearer token is never surfaced here.
     PROP(QString blobServer="" READONLY)
 
+    // URL of THIS instance's embedded blob server (the module doubles as the
+    // household media hub — photos/voice captured on a phone upload here). Shown so
+    // the user can set it as the phone's attachment URL. Empty if it can't listen or
+    // no LAN address was found. Content-addressed + sealed-only (zero-trust).
+    PROP(QString blobServerUrl="" READONLY)
+
     // Publish a synthetic run (as gzipped GPX, chunked) over Logos Delivery —
     // stand-in for the mobile app. Returns "" on success, or an error.
     SLOT(QString publishSampleRun())

@@ -25,6 +25,8 @@ logos_module(
     SOURCES
         src/perun_analytics_backend.h
         src/perun_analytics_backend.cpp
+        src/blob_server.h
+        src/blob_server.cpp
         src/perun_identity.h
         src/perun_identity.cpp
         src/pgp_words.h

@@ -1,7 +1,7 @@
 {
   "name": "perun_analytics",
   "display_name": "Perun Analytics",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "type": "ui_qml",
   "interface": "universal",
   "category": "fitness",

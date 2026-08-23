@@ -880,6 +880,14 @@ Item {
                         MouseArea { anchors.fill: parent; onClicked: annCompose.visible = true }
                     }
                 }
+                // Media hub: this module serves phone-captured photos/voice on the LAN.
+                // Show the URL so the user can set it as the phone's attachment server.
+                LogosText {
+                    Layout.fillWidth: true
+                    visible: root.backend && root.backend.blobServerUrl && root.backend.blobServerUrl.length > 0
+                    text: "📡 Media hub: " + (root.backend ? root.backend.blobServerUrl : "") + "  — set as the phone's attachment URL"
+                    color: Theme.palette.textTertiary; font.pixelSize: 10; wrapMode: Text.WordWrap
+                }
                 // Compose row (hidden until "+ Note"). Authors an ANNOTATION{text}
                 // over the same sealed channel as CHUNKs, pinned to the first GPS
                 // point (or 0,0 if the track has not loaded).

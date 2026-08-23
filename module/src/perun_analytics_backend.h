@@ -17,6 +17,7 @@
 #include "run_store.h"
 
 class QNetworkAccessManager;
+class PerunBlobServer;
 
 /**
  * @brief UI backend for Perun Analytics (universal authoring model).
@@ -86,6 +87,13 @@ private:
   bool applyAnnotation(const QJsonObject &a, bool persist);
   // Apply the winning edit (LWW by createdAt) over a target annotation's text, if present.
   void applyEditToTarget(const QString &runId, const QString &target);
+  // Embedded media hub: start the content-addressed blob server (autostarts with the
+  // module). Sealed blobs live under blobStoreDir(); decryptSealedToCache decrypts one
+  // into the sandbox media cache for display (shared by the local-first + remote paths).
+  void startBlobServer();
+  QString blobStoreDir() const;
+  bool decryptSealedToCache(const QString &blobId, const QString &mime,
+                            const QByteArray &sealed);
   void loadAnnotations();
   void publishAnnotations();
   void loadBlobConfig();
@@ -107,6 +115,7 @@ private:
 
   // Lazily created on the backend thread for OSM tile fetches (ensureTile).
   QNetworkAccessManager *m_net = nullptr;
+  PerunBlobServer *m_blobServer = nullptr;
   // Filesystem dir the QML sandbox can read tiles from (the plugin's qml dir),
   // set by the view via setTileRoot(). Empty until then.
   QString m_tileRoot;

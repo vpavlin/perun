@@ -13,6 +13,8 @@
 #include <QJsonDocument>
 #include <QLatin1String>
 #include <QNetworkAccessManager>
+
+#include "blob_server.h"
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
@@ -192,6 +194,37 @@ void PerunAnalyticsBackend::loadBlobConfig() {
   setBlobServer(m_blobUrl);
   if (!m_blobUrl.isEmpty())
     logEvent("blob server = " + m_blobUrl.toStdString());
+  startBlobServer();
+}
+
+// Sealed (ciphertext) blob store — the durable content-addressed hub, keyed by
+// sha256(sealed) == the mobile "cid". Lives in the data dir (persists; not the
+// sandbox tile root). The decrypted display cache is separate (mediaDir()).
+QString PerunAnalyticsBackend::blobStoreDir() const {
+  return m_dataDir + QStringLiteral("/blobs");
+}
+
+// Autostart the embedded content-addressed blob server so the desktop doubles as the
+// household media hub. Port from PERUN_BLOB_PORT (default 8087); falls back to an
+// OS-assigned port if taken. The mobile app points its attachment URL at blobServerUrl.
+void PerunAnalyticsBackend::startBlobServer() {
+  quint16 port = 8087;
+  if (qEnvironmentVariableIsSet("PERUN_BLOB_PORT")) {
+    bool ok = false;
+    const int p = qEnvironmentVariable("PERUN_BLOB_PORT").toInt(&ok);
+    if (ok && p > 0 && p < 65536)
+      port = static_cast<quint16>(p);
+  }
+  m_blobServer = new PerunBlobServer(blobStoreDir(), port, m_blobToken, this);
+  connect(m_blobServer, &PerunBlobServer::stored, this, [this](const QString &id) {
+    logEvent("blob received " + id.toStdString());
+  });
+  if (m_blobServer->start()) {
+    setBlobServerUrl(m_blobServer->url());
+    logEvent("blob hub listening at " + m_blobServer->url().toStdString());
+  } else {
+    logEvent("blob hub failed to listen");
+  }
 }
 
 void PerunAnalyticsBackend::loadAnnotations() {
@@ -620,6 +653,27 @@ QString extForMime(const QString &mime) {
 }
 } // namespace
 
+// Decrypt one sealed blob into the sandbox media cache (shared by the local-first
+// store path and the remote-fetch path). Returns true if the plaintext was written.
+bool PerunAnalyticsBackend::decryptSealedToCache(const QString &blobId,
+                                                 const QString &mime,
+                                                 const QByteArray &sealed) {
+  bool ok = false;
+  const perun::Bytes pt =
+      perun::open(m_id, toBytes(sealed), m_topic.toStdString(), &ok);
+  if (!ok)
+    return false;
+  const QString dir = mediaDir();
+  if (!QDir().mkpath(dir))
+    return false;
+  const QString path =
+      dir + QStringLiteral("/") + blobId + QStringLiteral(".") + extForMime(mime);
+  QSaveFile f(path);
+  if (!f.open(QIODevice::WriteOnly) || f.write(fromBytes(pt)) < 0 || !f.commit())
+    return false;
+  return true;
+}
+
 QString PerunAnalyticsBackend::loadMedia(QString blobId, QString mime) {
   // Only 64-hex sha256 ids are valid blob ids (also keeps the path safe).
   static const QRegularExpression kHex(QStringLiteral("^[0-9a-f]{64}$"));
@@ -631,6 +685,18 @@ QString PerunAnalyticsBackend::loadMedia(QString blobId, QString mime) {
   const QFileInfo cached(path);
   if (cached.exists() && cached.size() > 0)
     return QUrl::fromLocalFile(path).toString(); // synchronous cache hit
+
+  // Local-first: if we hold the sealed bytes (a phone uploaded them to our embedded
+  // hub, or we fetched them before), decrypt them here — no HTTP round-trip.
+  const QString sealedPath = blobStoreDir() + QStringLiteral("/") + blobId;
+  if (QFileInfo::exists(sealedPath)) {
+    QFile sf(sealedPath);
+    if (sf.open(QIODevice::ReadOnly)) {
+      const QByteArray sealed = sf.readAll();
+      if (decryptSealedToCache(blobId, mime, sealed))
+        return QUrl::fromLocalFile(path).toString();
+    }
+  }
 
   if (m_blobUrl.isEmpty()) {
     emit mediaFailed(blobId, QStringLiteral("blob server not configured"));
@@ -670,30 +736,16 @@ void PerunAnalyticsBackend::fetchAndDecryptBlob(const QString &blobId,
       return;
     }
     const QByteArray sealed = reply->readAll();
-    bool ok = false;
-    const perun::Bytes pt =
-        perun::open(m_id, toBytes(sealed), m_topic.toStdString(), &ok);
-    if (!ok) {
-      logEvent("blob decrypt failed " + blobId.toStdString());
+    if (m_tileRoot.isEmpty())
+      logEvent("media root unset — decrypted media will be sandbox-blocked");
+    if (!decryptSealedToCache(blobId, mime, sealed)) {
+      logEvent("blob decrypt/cache failed " + blobId.toStdString());
       emit mediaFailed(blobId, QStringLiteral("decrypt failed"));
       return;
     }
-    const QString dir = mediaDir();
-    if (m_tileRoot.isEmpty())
-      logEvent("media root unset — decrypted media will be sandbox-blocked");
-    if (!QDir().mkpath(dir)) {
-      emit mediaFailed(blobId, QStringLiteral("cannot create media dir"));
-      return;
-    }
     const QString path =
-        dir + QStringLiteral("/") + blobId + QStringLiteral(".") + extForMime(mime);
-    QSaveFile f(path);
-    if (!f.open(QIODevice::WriteOnly) || f.write(fromBytes(pt)) < 0 || !f.commit()) {
-      emit mediaFailed(blobId, QStringLiteral("cannot write media cache"));
-      return;
-    }
-    logEvent("cached decrypted media " + blobId.toStdString() + " (" +
-             std::to_string(pt.size()) + "B)");
+        mediaDir() + QStringLiteral("/") + blobId + QStringLiteral(".") + extForMime(mime);
+    logEvent("cached decrypted media " + blobId.toStdString());
     emit mediaReady(blobId, QUrl::fromLocalFile(path).toString());
   });
 }
