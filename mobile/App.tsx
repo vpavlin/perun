@@ -16,7 +16,7 @@ import { exportRun } from "./src/lib/gpxExport";
 import { shareViewImage } from "./src/lib/imageExport";
 import { syncRun } from "./src/lib/runSync";
 import { deliveryAvailable } from "./src/lib/delivery";
-import { startAnnotationReceive } from "./src/lib/annotations";
+import { startAnnotationReceive, useAnnotations } from "./src/lib/annotations";
 import { RunAnnotations } from "./src/components/Annotations";
 import { QuickAnnotate } from "./src/components/QuickAnnotate";
 import { SharedNodeStatus } from "./src/lib/loam-transport-pkg/src/SharedNodeStatus";
@@ -489,6 +489,11 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
   // Hide-map (issue #2): drop the OSM basemap before sharing so the route shape,
   // times and elevation stay but the *where* doesn't. Off by default.
   const [hideMap, setHideMap] = useState(false);
+  // Annotation pins on the MAIN route map — a switch, on by default when the run
+  // has any. Reuses RouteMap's markers; the dedicated composer map lives below.
+  const annotations = useAnnotations(run.id);
+  const [showPins, setShowPins] = useState(true);
+  const mapMarkers = annotations.map((a) => ({ id: a.id, lat: a.lat, lon: a.lon, kind: a.kind }));
   const share = async () => {
     try { await exportRun(run); }
     catch (e) { Alert.alert("Export failed", e instanceof Error ? e.message : String(e)); }
@@ -527,7 +532,13 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
         </View>
 
         <View style={[styles.mapBox, { width: w, height: 220 }]}>
-          <RouteMap points={run.track.points} width={w} height={220} hideBasemap={hideMap} />
+          <RouteMap
+            points={run.track.points}
+            width={w}
+            height={220}
+            hideBasemap={hideMap}
+            markers={showPins ? mapMarkers : undefined}
+          />
         </View>
 
         {run.track.points.some((p) => p.alt != null) && (
@@ -554,6 +565,14 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
       <Pressable style={styles.mapToggle} onPress={() => setHideMap((v) => !v)}>
         <Text style={styles.mapToggleText}>{hideMap ? "◻ Show map in image" : "◼ Hide map for sharing (privacy)"}</Text>
       </Pressable>
+
+      {mapMarkers.length > 0 && (
+        <Pressable style={styles.mapToggle} onPress={() => setShowPins((v) => !v)}>
+          <Text style={styles.mapToggleText}>
+            {showPins ? `◉ Annotations on map (${mapMarkers.length})` : "◎ Show annotations on map"}
+          </Text>
+        </Pressable>
+      )}
 
       <Pressable style={[styles.exportBtn, styles.shareImgBtn]} onPress={shareImg} disabled={imgBusy}>
         <Text style={[styles.exportText, { color: "#1a1206" }]}>{imgBusy ? "Preparing image…" : "Share image"}</Text>
