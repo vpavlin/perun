@@ -1,0 +1,10 @@
+{
+  "name": "perun-blob-server",
+  "version": "0.1.0",
+  "description": "Content-addressed, zero-trust blob store for Perun journey attachments (photos, voice notes). Metadata syncs over Delivery; sealed binaries live here.",
+  "type": "module",
+  "bin": { "perun-blob-server": "server.mjs" },
+  "scripts": { "start": "node server.mjs" },
+  "engines": { "node": ">=18" },
+  "license": "(MIT OR Apache-2.0)"
+}

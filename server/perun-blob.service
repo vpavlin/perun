@@ -1,0 +1,15 @@
+[Unit]
+Description=Perun blob server (content-addressed attachment store)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PERUN_BLOB_PORT=8090
+# Environment=PERUN_BLOB_TOKEN=change-me
+ExecStart=/usr/bin/env node %h/perun/server/server.mjs
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
