@@ -25,6 +25,8 @@ event-log/CRDT shape loam-sync formalizes. These ADRs record what is specific to
 
 - [0001](0001-journey-annotations-as-an-event-log.md) — Journey annotations are an append-only event log (CRDT), one event per note/edit/delete
 - [0002](0002-local-first-content-addressed-blobs.md) — Annotation media is local-first and content-addressed; the server is a swappable replication backend, never the source of truth
+- [0003](0003-embedded-blob-hub.md) — The Basecamp module embeds the media blob hub (autostarts with it), so the desktop is the household media server
+- [0004](0004-logos-storage-direction.md) — Logos Storage (Codex `storage_module`) is the media backend direction — proposed, spiked on `spike/logos-storage`
 
 ## Predating these ADRs
 
