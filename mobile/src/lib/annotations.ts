@@ -20,7 +20,7 @@ import { ensureNode, onMessage, getDeviceId, deliveryAvailable } from "./deliver
 import { loadIdentity } from "./identityStore";
 import { replicatePending } from "./blob";
 
-export type AnnotationKind = "text" | "photo" | "voice" | "delete";
+export type AnnotationKind = "text" | "photo" | "voice" | "delete" | "edit";
 
 /** The wire `a` object — exactly the shared contract's fields, nothing more. */
 export interface Annotation {
@@ -105,12 +105,28 @@ async function insert(a: Annotation, synced: boolean): Promise<boolean> {
 }
 
 // ---- display ----------------------------------------------------------------
-/** Apply delete tombstones, drop the deletes themselves, sort chronologically by t. */
+/**
+ * Fold the raw event log into the displayed annotations: apply delete tombstones and
+ * apply the winning `edit` (last-write-wins by createdAt) over each target's text, then
+ * drop the delete/edit events themselves and sort chronologically by t. Order-independent
+ * (an edit or delete may arrive before its target). Named applyTombstones for history.
+ */
 export function applyTombstones(list: Annotation[]): Annotation[] {
   const deleted = new Set<string>();
-  for (const a of list) if (a.kind === "delete" && a.target) deleted.add(a.target);
+  const edits = new Map<string, Annotation>(); // target -> winning edit (latest createdAt)
+  for (const a of list) {
+    if (a.kind === "delete" && a.target) deleted.add(a.target);
+    else if (a.kind === "edit" && a.target) {
+      const cur = edits.get(a.target);
+      if (!cur || a.createdAt > cur.createdAt) edits.set(a.target, a);
+    }
+  }
   return list
-    .filter((a) => a.kind !== "delete" && !deleted.has(a.id))
+    .filter((a) => a.kind !== "delete" && a.kind !== "edit" && !deleted.has(a.id))
+    .map((a) => {
+      const ed = edits.get(a.id);
+      return ed ? { ...a, text: ed.text } : a; // edit supersedes the caption/body text
+    })
     .sort((x, y) => x.t - y.t || x.createdAt - y.createdAt);
 }
 
@@ -174,6 +190,21 @@ export async function authorAnnotation(input: NewAnnotation): Promise<Annotation
   }
   await insert(a, sent);
   return a;
+}
+
+/**
+ * Edit an annotation's text/caption in place — an append-only supersede event
+ * (kind:"edit", target=a.id) that the fold applies LWW over the original. Works for a
+ * text note's body and for a photo/voice caption ("add a text note to the photo").
+ */
+export async function editAnnotation(a: Annotation, newText: string): Promise<void> {
+  await authorAnnotation({
+    runId: a.runId,
+    point: { lat: a.lat, lon: a.lon, alt: a.ele ?? undefined, t: a.t },
+    kind: "edit",
+    target: a.id,
+    text: newText,
+  });
 }
 
 /** Tombstone an annotation you authored (append-only kind:"delete"). */

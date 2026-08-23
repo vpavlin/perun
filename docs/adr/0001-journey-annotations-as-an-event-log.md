@@ -25,15 +25,18 @@ household key, AAD = topic):
 ```
 { v:1, type:"ANNOTATION", a:{
     id, runId, lat, lon, ele, t, createdAt, author,
-    kind:"text"|"photo"|"voice"|"delete",
+    kind:"text"|"photo"|"voice"|"delete"|"edit",
     text?, blobId?, mime?, dur?, target?
 }}
 ```
 
 - **Immutable + content-keyed by `a.id`.** Receiving the same `id` twice is a no-op
   (dedup) — so re-sending is safe and idempotent, which is how offline notes flush.
-- **Edit = a new event.** (No edit UI ships yet; when it does, it is another append,
-  never a mutation.)
+- **Edit = a new event** (`kind:"edit"`, `target` = the id it supersedes, carrying the
+  new `text`). The fold applies the winning edit — last-write-wins by `createdAt` — over
+  the target's caption/body; the edit events themselves aren't displayed. Order-independent
+  (an edit may arrive before its target). This is how a note's text is changed and how a
+  caption is added to a photo/voice, without ever mutating the original event.
 - **Delete = a tombstone** (`kind:"delete"`, `target` = the id it removes). Append-only:
   a delete can't be un-seen, and it commutes with a late-arriving original.
 - **Deterministic display fold.** `applyTombstones` drops tombstoned ids and the

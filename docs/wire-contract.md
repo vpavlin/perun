@@ -159,7 +159,8 @@ nothing upstream: republish-on-demand over the existing CHUNK envelope.
 ## Annotations (implemented)
 Journey annotations — text / photo / voice notes pinned to a point on a run — travel as
 their own sealed envelope, one event per note/edit/delete (append-only CRDT). Dedup by
-`a.id`; `kind:"delete"` is a tombstone removing `a.target`. Media bytes do NOT ride the
+`a.id`; `kind:"delete"` is a tombstone removing `a.target`; `kind:"edit"` supersedes
+`a.target`'s text/caption (LWW by `createdAt`). Media bytes do NOT ride the
 wire: `blobId` is a content id (`sha256` of the sealed bytes) resolved via a local-first
 blob store, best-effort replicated to a swappable backend. See
 [`adr/0001`](adr/0001-journey-annotations-as-an-event-log.md) and
@@ -167,7 +168,7 @@ blob store, best-effort replicated to a swappable backend. See
 
 ```
 { v:1, type:"ANNOTATION", a:{ id, runId, lat, lon, ele, t, createdAt, author,
-                              kind:"text"|"photo"|"voice"|"delete",
+                              kind:"text"|"photo"|"voice"|"delete"|"edit",
                               text?, blobId?, mime?, dur?, target? } }
 ```
 

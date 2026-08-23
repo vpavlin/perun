@@ -6,10 +6,10 @@
 // map dot, the elevation marker and the featured annotation are all derived from it.
 import React, { useMemo, useState } from "react";
 import {
-  Alert, Dimensions, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, View,
+  Alert, Dimensions, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { Run } from "../lib/types";
-import { Annotation, useAnnotations, deleteAnnotation } from "../lib/annotations";
+import { Annotation, useAnnotations, deleteAnnotation, editAnnotation } from "../lib/annotations";
 import {
   cumulativeDistances, totalDistance, pointAtDistance, distanceForTime,
 } from "../lib/route";
@@ -38,6 +38,9 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
   const [d, setD] = useState(0);
   // Full-screen photo viewer (tap the featured photo to expand).
   const [photoView, setPhotoView] = useState<Annotation | null>(null);
+  // In-place text/caption edit of an annotation.
+  const [editing, setEditing] = useState<Annotation | null>(null);
+  const [editText, setEditText] = useState("");
   // Zoom the map to a window around the playhead for precise pin placement.
   const [zoom, setZoom] = useState(false);
   const [zoomR, setZoomR] = useState(150); // crop radius in metres either side of the playhead
@@ -75,6 +78,11 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: () => { void deleteAnnotation(a); } },
     ]);
+  };
+  const startEdit = (a: Annotation) => { setEditText(a.text ?? ""); setEditing(a); };
+  const saveEdit = async () => {
+    if (editing) await editAnnotation(editing, editText);
+    setEditing(null);
   };
 
   const w = Dimensions.get("window").width - 32;
@@ -156,6 +164,9 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
                         {active ? "● at this point" : `${fmtDist(featured.dist)} · ${fmtClock(featured.a.t)}`}
                       </Text>
                       <View style={{ flex: 1 }} />
+                      <Pressable hitSlop={10} onPress={() => startEdit(featured!.a)}>
+                        <Text style={styles.cardEdit}>✎</Text>
+                      </Pressable>
                       <Pressable hitSlop={10} onPress={() => confirmDelete(featured!.a)}>
                         <Text style={styles.cardDel}>✕</Text>
                       </Pressable>
@@ -195,6 +206,34 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
             </>
           )}
         </ScrollView>
+
+        {/* In-place edit of a note's text / a photo·voice caption */}
+        <Modal visible={!!editing} transparent animationType="fade" onRequestClose={() => setEditing(null)}>
+          <View style={styles.editBackdrop}>
+            <View style={styles.editCard}>
+              <Text style={styles.editTitle}>
+                {editing?.kind === "text" ? "Edit note" : "Caption"}
+              </Text>
+              <TextInput
+                style={styles.editInput}
+                value={editText}
+                onChangeText={setEditText}
+                placeholder={editing?.kind === "text" ? "Note…" : "Add a caption…"}
+                placeholderTextColor={theme.textTertiary}
+                multiline
+                autoFocus
+              />
+              <View style={styles.editBtns}>
+                <Pressable style={[styles.editBtn, { borderColor: theme.border }]} onPress={() => setEditing(null)}>
+                  <Text style={styles.editBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[styles.editBtn, { backgroundColor: theme.primary, borderColor: theme.primary }]} onPress={saveEdit}>
+                  <Text style={[styles.editBtnText, { color: "#1a1206" }]}>Save</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         {/* Full-screen photo viewer */}
         <Modal visible={!!photoView} transparent animationType="fade" onRequestClose={() => setPhotoView(null)}>
@@ -244,7 +283,8 @@ const styles = StyleSheet.create({
   cardHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
   cardIcon: { fontSize: 18 },
   cardWhen: { color: theme.textSecondary, fontSize: 13, fontWeight: "600" },
-  cardDel: { color: theme.textTertiary, fontSize: 16, paddingLeft: 8 },
+  cardEdit: { color: theme.textTertiary, fontSize: 16, paddingLeft: 8 },
+  cardDel: { color: theme.textTertiary, fontSize: 16, paddingLeft: 12 },
   media: { height: 360, alignItems: "center", justifyContent: "center", marginVertical: 6 },
   expandHint: { position: "absolute", bottom: 6, right: 8, color: "#fff", fontSize: 11, fontWeight: "600", backgroundColor: "rgba(0,0,0,0.55)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, overflow: "hidden" },
   cardText: { color: theme.text, fontSize: 15, lineHeight: 21, marginTop: 6 },
@@ -256,4 +296,11 @@ const styles = StyleSheet.create({
   chipTextOn: { color: theme.primary },
   photoBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.94)", alignItems: "center", justifyContent: "center" },
   photoClose: { color: "#fff", fontSize: 14, marginTop: 16, opacity: 0.8 },
+  editBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", alignItems: "center", justifyContent: "center", padding: 24 },
+  editCard: { backgroundColor: theme.card, borderRadius: 16, borderWidth: 1, borderColor: theme.border, padding: 20, width: "100%", maxWidth: 420 },
+  editTitle: { color: theme.text, fontSize: 16, fontWeight: "700", marginBottom: 12 },
+  editInput: { backgroundColor: theme.elevated, borderRadius: 10, borderWidth: 1, borderColor: theme.border, color: theme.text, fontSize: 15, paddingHorizontal: 14, paddingVertical: 12, minHeight: 80, textAlignVertical: "top" },
+  editBtns: { flexDirection: "row", gap: 12, marginTop: 16 },
+  editBtn: { flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
+  editBtnText: { color: theme.text, fontSize: 15, fontWeight: "700" },
 });

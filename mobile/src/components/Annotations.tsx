@@ -21,7 +21,7 @@ import { theme } from "../theme";
 const W = () => Dimensions.get("window").width - 32;
 
 const KIND_ICON: Record<AnnotationKind, string> = {
-  text: "💬", photo: "📷", voice: "🎙️", delete: "🗑",
+  text: "💬", photo: "📷", voice: "🎙️", delete: "🗑", edit: "✏️",
 };
 
 function fmtClock(ms: number): string {
