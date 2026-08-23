@@ -10,6 +10,7 @@ import * as SecureStore from "expo-secure-store";
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-camera";
 import { Identity, secretFromScan } from "../lib/identity";
 import { loadIdentity, saveSecret, clearIdentity } from "../lib/identityStore";
+import { getAutoPause, setAutoPause, getBlobServer, setBlobServer } from "../lib/settings";
 import { theme } from "../theme";
 
 export function PairingScreen({
@@ -34,6 +35,18 @@ export function PairingScreen({
   const [sharedNode, setSharedNode] = useState(false);
   useEffect(() => { SecureStore.getItemAsync("perun-shared-node").then((v) => setSharedNode(v === "1")).catch(() => {}); }, []);
   const setSharedNodePref = (v: boolean) => { setSharedNode(v); SecureStore.setItemAsync("perun-shared-node", v ? "1" : "0").catch(() => {}); };
+
+  // Recording: auto-pause when you stop moving (default ON).
+  const [autoPause, setAutoPauseState] = useState(true);
+  useEffect(() => { getAutoPause().then(setAutoPauseState); }, []);
+  const setAutoPausePref = (v: boolean) => { setAutoPauseState(v); void setAutoPause(v); };
+
+  // Attachments: the blob server photos/voice are sealed and uploaded to. Text notes
+  // need no server. Persisted on blur (Save) so we don't hit the keystore per keystroke.
+  const [blobUrl, setBlobUrl] = useState("");
+  const [blobToken, setBlobToken] = useState("");
+  useEffect(() => { getBlobServer().then(({ url, token }) => { setBlobUrl(url); setBlobToken(token); }); }, []);
+  const saveBlobServer = () => { void setBlobServer(blobUrl, blobToken); };
 
   // Apply a scanned/typed string: parse → persist → show fingerprint.
   const apply = useCallback(
@@ -144,7 +157,55 @@ export function PairingScreen({
           </Text>
         </View>
 
-        <Pressable style={styles.primaryBtn} onPress={onClose}>
+        <View style={styles.nodeCard}>
+          <View style={styles.nodeHeader}>
+            <Text style={styles.nodeLabel}>Auto-pause when stopped</Text>
+            <Switch
+              value={autoPause}
+              onValueChange={setAutoPausePref}
+              trackColor={{ true: theme.primary, false: theme.border }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Text style={styles.nodeNote}>
+            Freezes moving-time + distance when you stop (a red light, a break) and opens a new
+            segment when you set off again. Manual pause is never auto-resumed.
+          </Text>
+        </View>
+
+        <View style={styles.nodeCard}>
+          <Text style={styles.nodeLabel}>Attachment server</Text>
+          <Text style={styles.nodeNote}>
+            Photos + voice are sealed on-device and uploaded here (the server only ever holds
+            ciphertext). Text notes work with no server. Leave blank to disable attachments.
+          </Text>
+          <Text style={styles.label}>Blob server URL</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="https://blobs.example:8090"
+            placeholderTextColor={theme.textTertiary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            value={blobUrl}
+            onChangeText={setBlobUrl}
+            onBlur={saveBlobServer}
+          />
+          <Text style={styles.label}>Token (optional)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Bearer token, if the server requires one"
+            placeholderTextColor={theme.textTertiary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            secureTextEntry
+            value={blobToken}
+            onChangeText={setBlobToken}
+            onBlur={saveBlobServer}
+          />
+        </View>
+
+        <Pressable style={styles.primaryBtn} onPress={() => { saveBlobServer(); onClose(); }}>
           <Text style={styles.primaryText}>Done</Text>
         </Pressable>
         <Pressable style={styles.ghostBtn} onPress={startScan}>

@@ -39,7 +39,8 @@ type MsgCb = (env: unknown) => void;
 let listeners: MsgCb[] = [];
 
 // A stable per-install device id used as the SDS senderId. Generated once, persisted.
-async function getDeviceId(): Promise<string> {
+// Also serves as an annotation's `author` (a device/addr string, per the wire contract).
+export async function getDeviceId(): Promise<string> {
   let id = await SecureStore.getItemAsync("perun-device-id");
   if (!id) {
     id = "perun-" + Math.random().toString(16).slice(2) + Date.now().toString(36);
@@ -160,9 +161,14 @@ export async function sendEnvelope(env: object): Promise<void> {
 // byte-identical → the fleet store dedups it. Any other (control) frame gets a
 // fresh random id so distinct control frames are never collapsed together.
 function sealIdFor(env: object): string {
-  const e = env as { type?: unknown; id?: unknown; rev?: unknown; seq?: unknown };
+  const e = env as { type?: unknown; id?: unknown; rev?: unknown; seq?: unknown; a?: { id?: unknown } };
   if (e.type === "CHUNK" && e.id != null && e.rev != null && e.seq != null) {
     return `${e.id}|${e.rev}|${e.seq}`;
+  }
+  // An ANNOTATION is immutable and uniquely identified by a.id — seal it deterministically
+  // too, so a re-send is byte-identical and the fleet store dedups it (matches CHUNK).
+  if (e.type === "ANNOTATION" && e.a && e.a.id != null) {
+    return `ann|${e.a.id}`;
   }
   return hex(Crypto.getRandomBytes(12));
 }

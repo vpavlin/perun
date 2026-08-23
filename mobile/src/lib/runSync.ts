@@ -55,3 +55,14 @@ export async function syncRun(run: Run, onStatus?: SyncProgress): Promise<void> 
 
   onStatus?.("Synced ✓");
 }
+
+/**
+ * Publish ONE journey annotation on the run's sealed channel — the same seal+send path
+ * as a CHUNK (sendEnvelope seals the whole envelope-JSON with the pairing key and hands
+ * it to the transport). The envelope's `a` is the exact shared wire contract; the desktop
+ * (and other phones) dedup by a.id and apply kind:"delete" tombstones. `a` is typed loosely
+ * here to avoid a circular import with annotations.ts (which owns the Annotation type).
+ */
+export async function sendAnnotation(a: { id: string; runId: string; kind: string }): Promise<void> {
+  await sendEnvelope({ v: 1, type: "ANNOTATION", a });
+}

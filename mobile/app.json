@@ -56,7 +56,20 @@
         }
       ],
       "./src/lib/loam-transport-pkg/plugins/withDeliveryClient.js",
-      "./plugins/withLocationService"
+      "./plugins/withLocationService",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Perun attaches photos to points on your route.",
+          "cameraPermission": "Perun takes photos to attach to points on your route."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Perun records voice notes to attach to points on your route."
+        }
+      ]
     ]
   }
 }

@@ -3,11 +3,26 @@
 // on disk and fetched at most once; if none load (offline / fetch error) we fall
 // back to exactly the old behaviour — the track on the plain dark background.
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { GestureResponderEvent, Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Image as SvgImage, Polyline, Rect } from "react-native-svg";
 import { buildLayout, getTile, MapLayout, TILE_SIZE } from "../lib/tiles";
 import { GeoPoint } from "../lib/types";
 import { theme } from "../theme";
+
+/** A pin drawn on the route at (lat,lon). `kind` colours it; `id` links it to a list row. */
+export interface MapMarker {
+  id: string;
+  lat: number;
+  lon: number;
+  kind: string;
+}
+
+// Marker colour per annotation kind (falls back to primary).
+function markerColor(kind: string): string {
+  if (kind === "photo") return "#4aa3ff";
+  if (kind === "voice") return "#c07af0";
+  return theme.primary; // text
+}
 
 // Resolve a layout's tiles to file:// URIs. Keyed on layout.key (bbox+zoom), so
 // the live view — which re-renders ~1/s as points stream in — only refetches
@@ -42,6 +57,12 @@ export function RouteMap({
   height,
   hideBasemap = false,
   fitPoints,
+  markers,
+  onMarkerPress,
+  highlightId,
+  pickMode = false,
+  onPickPoint,
+  pickedPoint,
 }: {
   points: GeoPoint[];
   width: number;
@@ -53,6 +74,17 @@ export function RouteMap({
    *  the last ~150 m — for a "follow"/zoomed crop while the full track is still
    *  drawn. The projection is shared, so the polyline still registers. */
   fitPoints?: GeoPoint[];
+  /** Annotation pins to draw on the route. */
+  markers?: MapMarker[];
+  /** Tapped a pin → focus its list row. */
+  onMarkerPress?: (id: string) => void;
+  /** Draw this marker larger (the focused list row). */
+  highlightId?: string;
+  /** When true, tapping the map picks the nearest track point (onPickPoint). */
+  pickMode?: boolean;
+  onPickPoint?: (p: GeoPoint) => void;
+  /** A candidate point being placed (shown as a hollow ring). */
+  pickedPoint?: GeoPoint | null;
 }) {
   const fit = fitPoints && fitPoints.length >= 2 ? fitPoints : points;
   const layout = React.useMemo(() => buildLayout(fit, width, height), [fit, width, height]);
@@ -60,6 +92,21 @@ export function RouteMap({
   // the effect's key never changes so it stays quiet.
   const uris = useTiles(hideBasemap ? null : layout);
   if (!points || points.length < 2 || !layout) return null;
+
+  // Tap → nearest track point (by projected screen distance). Used to place an
+  // annotation on the route post-hoc.
+  const onTap = (e: GestureResponderEvent) => {
+    if (!pickMode || !onPickPoint || !layout) return;
+    const { locationX, locationY } = e.nativeEvent;
+    let best: GeoPoint | null = null;
+    let bestD = Infinity;
+    for (const p of points) {
+      const [px, py] = layout.project(p);
+      const d = (px - locationX) ** 2 + (py - locationY) ** 2;
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    if (best) onPickPoint(best);
+  };
 
   // One polyline per segment: a point flagged `brk` opens a new one, so a pause
   // shows as a gap instead of a straight line teleporting across the map.
@@ -101,7 +148,34 @@ export function RouteMap({
         ))}
         <Circle cx={sx} cy={sy} r={4.5} fill={theme.success} stroke={theme.bg} strokeWidth={1.5} />
         <Circle cx={ex} cy={ey} r={4.5} fill={theme.error} stroke={theme.bg} strokeWidth={1.5} />
+        {/* Candidate point being placed (before the note is authored). */}
+        {pickedPoint && (() => {
+          const [px, py] = layout.project(pickedPoint);
+          return <Circle cx={px} cy={py} r={7} fill="none" stroke={theme.text} strokeWidth={2} />;
+        })()}
+        {/* Annotation pins. A larger transparent circle beneath widens the touch target. */}
+        {markers?.map((mk) => {
+          const [px, py] = layout.project({ lat: mk.lat, lon: mk.lon, t: 0 });
+          const on = mk.id === highlightId;
+          return (
+            <React.Fragment key={mk.id}>
+              <Circle cx={px} cy={py} r={14} fill="transparent" onPress={() => onMarkerPress?.(mk.id)} />
+              <Circle
+                cx={px}
+                cy={py}
+                r={on ? 7 : 5}
+                fill={markerColor(mk.kind)}
+                stroke={theme.bg}
+                strokeWidth={on ? 2.5 : 1.5}
+                onPress={() => onMarkerPress?.(mk.id)}
+              />
+            </React.Fragment>
+          );
+        })}
       </Svg>
+      {/* Transparent tap layer for placing a point — only mounted in pick mode so it
+          never steals touches from the map controls in normal viewing. */}
+      {pickMode && <Pressable style={StyleSheet.absoluteFill} onPress={onTap} />}
       {/* Required by the OSM tile usage policy whenever tiles are shown. */}
       {hasTiles && <Text style={styles.attribution}>© OpenStreetMap contributors</Text>}
     </View>

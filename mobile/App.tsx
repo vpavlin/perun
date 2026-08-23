@@ -16,6 +16,8 @@ import { exportRun } from "./src/lib/gpxExport";
 import { shareViewImage } from "./src/lib/imageExport";
 import { syncRun } from "./src/lib/runSync";
 import { deliveryAvailable } from "./src/lib/delivery";
+import { startAnnotationReceive } from "./src/lib/annotations";
+import { RunAnnotations } from "./src/components/Annotations";
 import { SharedNodeStatus } from "./src/lib/loam-transport-pkg/src/SharedNodeStatus";
 import { RouteMap } from "./src/components/RouteMap";
 import { ElevationChart } from "./src/components/ElevationChart";
@@ -67,6 +69,20 @@ export default function App() {
   // at launch and crash-loop the app. Clear any stale one on start.
   useEffect(() => { clearStaleTask(); }, []);
   useEffect(() => { loadIdentity().then(setPaired); }, []);
+
+  // Ingest annotations from the wire once paired: bring the node up, subscribe, store
+  // incoming ANNOTATION envelopes (dedup by id, tombstones applied on read), and flush
+  // any locally-authored ones that never made it out. Best-effort; no-op if not paired.
+  useEffect(() => {
+    if (!paired) return;
+    let off = () => {};
+    let alive = true;
+    startAnnotationReceive().then((unsub) => {
+      if (alive) off = unsub;
+      else unsub();
+    }).catch(() => {});
+    return () => { alive = false; off(); };
+  }, [paired]);
 
   // perun://pair?s=… deep link → open the pairing screen prefilled. Handles both
   // a cold start (getInitialURL) and a link arriving while the app is running.
@@ -186,7 +202,7 @@ export default function App() {
         <StatusBar barStyle="light-content" />
         <View style={styles.header}>
           <Text style={styles.title}>
-            {sportInfo(rec.sport).label} · {rec.isPaused ? "paused" : "recording"}
+            {sportInfo(rec.sport).label} · {rec.isPaused ? (rec.isAutoPaused ? "auto-paused" : "paused") : "recording"}
           </Text>
         </View>
         <ScrollView contentContainerStyle={{ paddingBottom: 108 }} showsVerticalScrollIndicator={false}>
@@ -198,7 +214,11 @@ export default function App() {
         </View>
         {/* Paused is a state you can leave the phone in for minutes — it has to
             be obvious from across a table that nothing is being recorded. */}
-        {rec.isPaused && <Text style={styles.pausedNote}>Paused — GPS not recording</Text>}
+        {rec.isPaused && (
+          <Text style={styles.pausedNote}>
+            {rec.isAutoPaused ? "Auto-paused (stopped) — move to resume" : "Paused — GPS not recording"}
+          </Text>
+        )}
         <View style={styles.subStats}>
           <View style={styles.subStat}>
             <Text style={styles.tileK}>Time</Text>
@@ -545,6 +565,10 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
           </Text>
         </Pressable>
       )}
+
+      {/* Journey annotations: pinned notes/photos/voice on this run's route. Lives
+          OUTSIDE the shot card so pins + the composer never leak into a shared image. */}
+      <RunAnnotations run={run} />
 
       {/* Delete lived ONLY on a long-press of the list row — a gesture with no
           affordance, so effectively the feature didn't exist. It goes last and
