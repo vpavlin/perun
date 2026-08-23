@@ -508,6 +508,24 @@ bool PerunAnalyticsBackend::applyAnnotation(const QJsonObject &a, bool persist) 
     return tombNew || had;
   }
 
+  if (kind == QLatin1String("edit")) {
+    const QString target = a.value(QStringLiteral("target")).toString();
+    if (target.isEmpty())
+      return false;
+    // Keep only the newest edit per target (LWW by createdAt); order-independent, so an
+    // edit arriving before its target is remembered and applied when the target lands.
+    const double cAt = a.value(QStringLiteral("createdAt")).toDouble();
+    QMap<QString, QJsonObject> &edits = m_annEdits[runId];
+    const bool newer = !edits.contains(target) ||
+        cAt > edits.value(target).value(QStringLiteral("createdAt")).toDouble();
+    if (newer)
+      edits.insert(target, a);
+    doPersist();
+    if (newer)
+      applyEditToTarget(runId, target);
+    return newer;
+  }
+
   // A non-delete whose id is already tombstoned stays suppressed.
   if (m_annDeleted.value(runId).contains(id))
     return false;
@@ -515,8 +533,20 @@ bool PerunAnalyticsBackend::applyAnnotation(const QJsonObject &a, bool persist) 
   if (m_annotations.value(runId).contains(id))
     return false;
   m_annotations[runId].insert(id, a);
+  applyEditToTarget(runId, id); // a caption edit may have arrived before this photo
   doPersist();
   return true;
+}
+
+// Override a target annotation's text with its winning edit, if both are present.
+void PerunAnalyticsBackend::applyEditToTarget(const QString &runId, const QString &target) {
+  if (!m_annEdits.value(runId).contains(target))
+    return;
+  if (!m_annotations.value(runId).contains(target))
+    return;
+  QJsonObject obj = m_annotations[runId].value(target);
+  obj.insert(QStringLiteral("text"), m_annEdits[runId].value(target).value(QStringLiteral("text")));
+  m_annotations[runId].insert(target, obj);
 }
 
 // runId -> [annotations sorted by point time t]. Auto-syncs to QML like runsJson.

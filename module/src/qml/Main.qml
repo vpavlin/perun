@@ -33,7 +33,60 @@ Item {
     // each change so bindings re-evaluate (QML can't see in-place mutation).
     property var mediaUrls: ({})
 
-    onSelectedRunChanged: root.selectedAnnotation = -1
+    // ---- Replay mode: drag a playhead along the route; the annotation you're
+    //      passing surfaces in a side panel with the stats at that point. ----
+    property bool replayMode: false
+    property int headIdx: 0                 // playhead = trackPoints[headIdx]
+    property var cumDist: []                // cumulative distance (m) per track point
+    property real totalDist: 0
+    property int featIdx: -1               // featured annotation (nearest to playhead)
+    property real featGap: 1e18            // metres between playhead and featured ann
+    readonly property real featThreshold: Math.max(40, totalDist * 0.02)
+
+    function rebuildCum() {
+        var pts = root.trackPoints || [];
+        var c = new Array(pts.length);
+        var d = 0;
+        for (var i = 0; i < pts.length; i++) {
+            if (i > 0 && !pts[i].brk)
+                d += root.haversine(pts[i-1].lat, pts[i-1].lon, pts[i].lat, pts[i].lon);
+            c[i] = d;
+        }
+        root.cumDist = c;
+        root.totalDist = pts.length ? c[pts.length - 1] : 0;
+        if (root.headIdx >= pts.length) root.headIdx = Math.max(0, pts.length - 1);
+        root.recomputeFeatured();
+    }
+    function headDist() {
+        return (root.cumDist.length && root.headIdx < root.cumDist.length) ? root.cumDist[root.headIdx] : 0;
+    }
+    function nearestIdxToDist(dist) {
+        var c = root.cumDist;
+        if (!c.length) return 0;
+        var best = 0, bd = 1e18;
+        for (var i = 0; i < c.length; i++) { var g = Math.abs(c[i] - dist); if (g < bd) { bd = g; best = i; } }
+        return best;
+    }
+    function annDistance(ann) {
+        var p = root.trackPoints, c = root.cumDist;
+        if (!p.length) return 0;
+        var best = 0, bd = 1e18;
+        for (var i = 0; i < p.length; i++) { var g = root.haversine(p[i].lat, p[i].lon, ann.lat, ann.lon); if (g < bd) { bd = g; best = i; } }
+        return c[best] || 0;
+    }
+    function recomputeFeatured() {
+        var as = root.annotations;
+        if (!as || !as.length) { root.featIdx = -1; root.featGap = 1e18; return; }
+        var hd = root.headDist();
+        var bi = -1, bd = 1e18;
+        for (var i = 0; i < as.length; i++) { var g = Math.abs(root.annDistance(as[i]) - hd); if (g < bd) { bd = g; bi = i; } }
+        root.featIdx = bi; root.featGap = bd;
+    }
+    onHeadIdxChanged: root.recomputeFeatured()
+    onAnnotationsChanged: root.recomputeFeatured()
+    onTrackPointsChanged: root.rebuildCum()
+
+    onSelectedRunChanged: { root.selectedAnnotation = -1; root.headIdx = 0; }
 
     function setMedia(blobId, val) {
         var m = {};
@@ -434,7 +487,7 @@ Item {
                 Rectangle {
                     id: mapBox
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 210
+                    Layout.preferredHeight: root.replayMode ? 380 : 210
                     radius: Theme.spacing.radiusSmall
                     color: Theme.palette.backgroundElevated
                     border.color: Theme.palette.borderHairline
@@ -694,6 +747,112 @@ Item {
                             font.pixelSize: 9
                         }
                     }
+
+                    // ---- Replay: playhead + drag-scrub + side annotation panel ----
+                    // Playhead ring travelling the route as you scrub.
+                    Rectangle {
+                        visible: root.replayMode && mapBox.layout !== null && root.trackPoints.length > root.headIdx
+                        property point pp: (mapBox.layout, root.trackPoints.length ? mapBox.project(root.trackPoints[root.headIdx].lat, root.trackPoints[root.headIdx].lon) : Qt.point(-9999, -9999))
+                        width: 16; height: 16; radius: 8
+                        x: pp.x - 8; y: pp.y - 8
+                        color: Theme.palette.primary
+                        border.width: 2; border.color: Theme.palette.background
+                        z: 5
+                    }
+                    // Drag anywhere on the map to move the playhead to the nearest track point.
+                    MouseArea {
+                        visible: root.replayMode
+                        enabled: root.replayMode
+                        anchors.fill: parent
+                        z: 4
+                        preventStealing: true
+                        function scrubAt(mx, my) {
+                            var p = root.trackPoints;
+                            if (!p.length || !mapBox.layout) return;
+                            var best = 0, bd = 1e18;
+                            for (var i = 0; i < p.length; i++) {
+                                var pt = mapBox.project(p[i].lat, p[i].lon);
+                                var g = (pt.x - mx) * (pt.x - mx) + (pt.y - my) * (pt.y - my);
+                                if (g < bd) { bd = g; best = i; }
+                            }
+                            root.headIdx = best;
+                        }
+                        onPressed: (m) => scrubAt(m.x, m.y)
+                        onPositionChanged: (m) => { if (pressed) scrubAt(m.x, m.y); }
+                    }
+                    // Side panel — the annotation you're passing, with stats at this point.
+                    Rectangle {
+                        id: replayPanel
+                        visible: root.replayMode
+                        z: 6
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        anchors.margins: 8
+                        width: Math.min(360, parent.width * 0.45)
+                        radius: Theme.spacing.radiusSmall
+                        color: "#f20d1013"   // near-opaque panel over the map
+                        border.width: 1
+                        border.color: Theme.palette.borderHairline
+                        property var fa: (root.featIdx >= 0 && root.annotations.length > root.featIdx) ? root.annotations[root.featIdx] : null
+                        onFaChanged: if (fa && fa.blobId && (fa.kind === "photo" || fa.kind === "voice")) root.ensureMedia(fa.blobId, fa.mime)
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 8
+                            LogosText {
+                                Layout.fillWidth: true
+                                text: root.fmtDist(root.headDist()) + "  ·  " + (root.trackPoints.length ? root.fmtDur((root.trackPoints[root.headIdx].t - root.trackPoints[0].t) / 1000) : "0:00")
+                                color: Theme.palette.text; font.pixelSize: 15; font.bold: true
+                            }
+                            LogosText {
+                                Layout.fillWidth: true
+                                visible: root.trackPoints.length && root.trackPoints[root.headIdx].altValid
+                                text: "Elevation " + root.fmtElev(root.trackPoints.length ? root.trackPoints[root.headIdx].alt : 0)
+                                color: Theme.palette.textSecondary; font.pixelSize: 12
+                            }
+                            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.palette.borderHairline }
+                            LogosText {
+                                Layout.fillWidth: true
+                                text: replayPanel.fa
+                                    ? (root.iconForKind(replayPanel.fa.kind) + "  " + (root.featGap <= root.featThreshold ? "● at this point" : ("at " + root.fmtDist(root.annDistance(replayPanel.fa)))))
+                                    : "No annotations — drag to replay the route."
+                                color: Theme.palette.textSecondary; font.pixelSize: 12; wrapMode: Text.WordWrap
+                            }
+                            Image {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 190
+                                visible: replayPanel.fa && replayPanel.fa.kind === "photo"
+                                fillMode: Image.PreserveAspectFit
+                                source: (replayPanel.fa && root.mediaUrls[replayPanel.fa.blobId]) ? root.mediaUrls[replayPanel.fa.blobId] : ""
+                            }
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 40
+                                visible: replayPanel.fa && replayPanel.fa.kind === "voice"
+                                radius: Theme.spacing.radiusSmall
+                                color: Theme.palette.backgroundInset
+                                border.width: 1; border.color: Theme.palette.borderHairline
+                                LogosText {
+                                    anchors.centerIn: parent
+                                    text: "▶  Play voice note"
+                                    color: Theme.palette.primary; font.pixelSize: 13
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: if (replayPanel.fa) root.playVoice(replayPanel.fa.blobId, replayPanel.fa.mime)
+                                }
+                            }
+                            LogosText {
+                                Layout.fillWidth: true
+                                visible: replayPanel.fa && replayPanel.fa.text
+                                text: replayPanel.fa ? (replayPanel.fa.text || "") : ""
+                                color: Theme.palette.text; font.pixelSize: 14; wrapMode: Text.WordWrap
+                            }
+                            Item { Layout.fillHeight: true }
+                        }
+                    }
                 }
 
                 // ---- Journey annotations: photos / voice notes / text comments
@@ -704,6 +863,13 @@ Item {
                     LogosText {
                         text: "HIGHLIGHTS  ·  " + root.annotations.length
                         color: Theme.palette.textTertiary; font.pixelSize: 11
+                    }
+                    LogosText {
+                        Layout.leftMargin: 12
+                        text: root.replayMode ? "◉ Exit replay" : "▶ Replay"
+                        color: Theme.palette.primary; font.pixelSize: 12
+                        visible: root.selectedRun !== null && root.trackPoints.length >= 2
+                        MouseArea { anchors.fill: parent; onClicked: root.replayMode = !root.replayMode }
                     }
                     Item { Layout.fillWidth: true }
                     // Desktop text authoring: pin a note to the run's start point.
@@ -939,7 +1105,32 @@ Item {
                             ctx.fillText(Math.round(minA) + " m", Wd - pad, Hd - pad - 3);
                             ctx.textAlign = "left";
                             ctx.fillText("+" + Math.round(maxA - minA) + " m", pad, Hd - pad - 3);
+                            // Replay playhead — a vertical marker on the full-route distance axis.
+                            if (root.replayMode && root.totalDist > 0) {
+                                var hx = pad + (root.headDist() / root.totalDist) * (Wd - 2 * pad);
+                                ctx.strokeStyle = Theme.palette.text; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.85;
+                                ctx.beginPath(); ctx.moveTo(hx, pad); ctx.lineTo(hx, Hd - pad); ctx.stroke();
+                                ctx.globalAlpha = 1.0;
+                            }
                         }
+                    }
+                    // Repaint the elevation playhead when it moves / mode toggles.
+                    Connections { target: root; function onHeadIdxChanged() { elevCanvas.requestPaint(); } }
+                    Connections { target: root; function onReplayModeChanged() { elevCanvas.requestPaint(); } }
+                    // Drag the elevation strip to scrub (shares the full-route distance axis).
+                    MouseArea {
+                        visible: root.replayMode
+                        enabled: root.replayMode
+                        anchors.fill: parent
+                        z: 3
+                        preventStealing: true
+                        function scrub(mx) {
+                            var pad = 6;
+                            var frac = Math.max(0, Math.min(1, (mx - pad) / Math.max(1, width - 2 * pad)));
+                            root.headIdx = root.nearestIdxToDist(frac * root.totalDist);
+                        }
+                        onPressed: (m) => scrub(m.x)
+                        onPositionChanged: (m) => { if (pressed) scrub(m.x); }
                     }
                 }
 

@@ -84,6 +84,8 @@ private:
   // apply kind:"delete" tombstones (order-independent). Persists when persist is
   // true. Returns true if the set changed. Used by both live ingest and load.
   bool applyAnnotation(const QJsonObject &a, bool persist);
+  // Apply the winning edit (LWW by createdAt) over a target annotation's text, if present.
+  void applyEditToTarget(const QString &runId, const QString &target);
   void loadAnnotations();
   void publishAnnotations();
   void loadBlobConfig();
@@ -121,6 +123,9 @@ private:
   // suppresses it. Both persisted via RunStore.
   QMap<QString, QMap<QString, QJsonObject>> m_annotations;
   QMap<QString, QSet<QString>> m_annDeleted;
+  // runId -> target -> the winning edit event (kind:"edit"), LWW by createdAt. Applied
+  // over the target's text; kept so an edit arriving before its target still wins.
+  QMap<QString, QMap<QString, QJsonObject>> m_annEdits;
 
   // Blob server for photo/voice media (empty = unconfigured). Token is upload-
   // only; reads are open, but we send it too if set.
