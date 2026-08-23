@@ -13,6 +13,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { startRunService, stopRunService, updateRunNotification } from "./keepalive";
 import { GeoPoint, Track, Sport, sportInfo } from "./types";
 import { computeSummary, haversine } from "./analytics";
+import { getAutoPause } from "./settings";
 
 const RECORDER_OPTIONS: Location.LocationOptions = {
   accuracy: Location.Accuracy.BestForNavigation,
@@ -29,6 +30,16 @@ const KEEP_AWAKE_TAG = "perun-recording";
 // NOTE: the outlier speed gate is PER-SPORT (see Session.sport). A running gate
 // of 12 m/s would silently drop a cycling descent and corrupt the track, which
 // is why the sport must be chosen before recording starts.
+
+// ---- auto-pause -------------------------------------------------------------
+// Stop moving ⇒ freeze moving-time + distance (like a manual pause), and open a new
+// <trkseg> on the next resumed point. Hysteresis (separate pause/resume speeds) stops
+// it flapping at a stoplight. Because the recorder uses distanceInterval:1, fixes stop
+// arriving entirely when you stand still — so a stall in fixes (lastFixAt) is itself the
+// strongest "stopped" signal, alongside observed low speed.
+const AUTO_PAUSE_SPEED = 0.5; // m/s — below this counts as "stopped"
+const AUTO_RESUME_SPEED = 1.0; // m/s — above this resumes (hysteresis gap)
+const AUTO_PAUSE_WINDOW_MS = 15000; // sustained low-speed / no-fix wall time before pausing
 
 export interface LiveStats {
   distanceM: number;
@@ -59,6 +70,11 @@ class Session {
   points: GeoPoint[] = [];
   recording = false;
   paused = false;
+  /** True when the current pause was triggered by auto-pause (never true for a manual
+   *  pause). Kept distinct so manual pause is NEVER auto-resumed. */
+  autoPaused = false;
+  /** User preference (settings): auto-pause on stop. Loaded at start; default ON. */
+  autoPauseEnabled = true;
   startedAt = 0;
   /** Chosen at start — gates outlier speed and picks pace-vs-speed display. */
   sport: Sport = "running";
@@ -68,6 +84,9 @@ class Session {
   private pausedAt = 0;
   /** Set on resume; tags the next accepted fix as opening a new <trkseg>. */
   private pendingBrk = false;
+  /** Auto-pause bookkeeping: when low-speed first started, and the last fix wall-time. */
+  private lowSince = 0;
+  private lastFixAt = 0;
   private listeners = new Set<() => void>();
 
   subscribe(fn: () => void): () => void {
@@ -78,25 +97,57 @@ class Session {
 
   begin(sport: Sport) {
     this.points = []; this.rejectStreak = 0; this.startedAt = Date.now();
-    this.paused = false; this.pausedAccumMs = 0; this.pausedAt = 0;
-    this.pendingBrk = false;
+    this.paused = false; this.autoPaused = false; this.pausedAccumMs = 0; this.pausedAt = 0;
+    this.pendingBrk = false; this.lowSince = 0; this.lastFixAt = 0;
     this.sport = sport; this.recording = true; this.emit();
   }
-  end() { this.recording = false; this.paused = false; this.emit(); }
+  end() { this.recording = false; this.paused = false; this.autoPaused = false; this.emit(); }
 
   pause() {
     if (!this.recording || this.paused) return;
-    this.paused = true; this.pausedAt = Date.now(); this.emit();
+    // A deliberate manual pause: mark it NOT auto so the state machine never resumes it.
+    this.paused = true; this.autoPaused = false; this.pausedAt = Date.now();
+    this.lowSince = 0; this.emit();
   }
   resume() {
     if (!this.recording || !this.paused) return;
     this.pausedAccumMs += Date.now() - this.pausedAt;
-    this.paused = false; this.pausedAt = 0;
+    this.paused = false; this.autoPaused = false; this.pausedAt = 0; this.lowSince = 0;
     // The next fix starts a new segment. Without this the resume point would be
     // joined to the pre-pause point and the gap counted as distance.
     this.pendingBrk = true;
     this.rejectStreak = 0;
     this.emit();
+  }
+
+  // ---- auto-pause state transitions ----
+  private autoPause() {
+    this.paused = true; this.autoPaused = true; this.pausedAt = Date.now();
+    this.lowSince = 0; this.emit();
+  }
+  private autoResume() {
+    this.pausedAccumMs += Date.now() - this.pausedAt;
+    this.paused = false; this.autoPaused = false; this.pausedAt = 0; this.lowSince = 0;
+    this.pendingBrk = true; this.rejectStreak = 0;
+    this.emit();
+  }
+  /** Instantaneous speed for the auto-pause machine: GPS speed if present, else derived. */
+  private estimateSpeed(p: GeoPoint, prev?: GeoPoint): number | null {
+    if (p.speed != null && p.speed >= 0) return p.speed;
+    if (!prev) return null;
+    const dt = Math.max(0.001, (p.t - prev.t) / 1000);
+    return haversine(prev.lat, prev.lon, p.lat, p.lon) / dt;
+  }
+  /**
+   * Wall-clock watchdog (called ~2s by the notification timer). With distanceInterval:1,
+   * standing still stops delivering fixes entirely, so a stall in fixes IS the stop: once
+   * no fix has arrived for the window, auto-pause. (Slowly-moving stops are caught by the
+   * per-fix low-speed path in ingest.) Never touches a manual pause.
+   */
+  tickAutoPause() {
+    if (!this.recording || !this.autoPauseEnabled || this.paused) return;
+    if (this.points.length < 1 || !this.lastFixAt) return;
+    if (Date.now() - this.lastFixAt >= AUTO_PAUSE_WINDOW_MS) this.autoPause();
   }
   /** Paused wall-clock so far, including an in-progress pause. */
   pausedMs(): number {
@@ -104,11 +155,40 @@ class Session {
   }
 
   ingest(fix: Location.LocationObject) {
-    if (!this.recording || this.paused) return;
+    if (!this.recording) return;
+    // A MANUAL pause is fully frozen — the user controls resume. An AUTO pause still
+    // processes fixes below, so movement can auto-resume it.
+    if (this.paused && !this.autoPaused) return;
     const acc = fix.coords.accuracy;
     if (acc != null && acc > MAX_ACCURACY_M) return;
 
     const p = fixToPoint(fix);
+    this.lastFixAt = Date.now();
+
+    // ---- auto-pause state machine (runs before the accept logic) ----
+    if (this.autoPauseEnabled) {
+      const spd = this.estimateSpeed(p, this.points[this.points.length - 1]);
+      if (this.autoPaused) {
+        // Only real movement (above the resume threshold) ends an auto-pause.
+        if (spd != null && spd >= AUTO_RESUME_SPEED) {
+          this.autoResume(); // accrues paused time, sets pendingBrk → new <trkseg>
+          // fall through to record THIS fix as the resume point
+        } else {
+          return; // still stopped: swallow the fix so nothing accrues
+        }
+      } else if (spd != null) {
+        if (spd < AUTO_PAUSE_SPEED) {
+          if (this.lowSince === 0) this.lowSince = p.t;
+          else if (p.t - this.lowSince >= AUTO_PAUSE_WINDOW_MS) {
+            this.autoPause();
+            return; // swallow the stationary fix that tripped the pause
+          }
+        } else if (spd >= AUTO_RESUME_SPEED) {
+          this.lowSince = 0; // clearly moving again (the hysteresis band leaves it as-is)
+        }
+      }
+    }
+
     const prev = this.points[this.points.length - 1];
     if (!prev) { this.points.push(p); this.rejectStreak = 0; this.emit(); return; }
 
@@ -192,14 +272,20 @@ function notifText(s: LiveStats): string {
 export async function startRecording(sport: Sport = "running"): Promise<boolean> {
   if ((await requestForeground()) !== "granted") return false;
   session.begin(sport);
+  // Load the auto-pause preference (default ON) before the first fix arrives.
+  session.autoPauseEnabled = await getAutoPause();
   try {
     fgSub = await Location.watchPositionAsync(RECORDER_OPTIONS, (fix) => session.ingest(fix));
     // Keep the process (and thus this foreground watch) alive when backgrounded / screen off.
     await startRunService();
-    // Push live stats to the notification every 2s (silent — setOnlyAlertOnce).
+    // Push live stats to the notification every 2s (silent — setOnlyAlertOnce). This tick
+    // also drives the auto-pause watchdog (a fix stall = you stopped moving).
     if (notifTimer) clearInterval(notifTimer);
     updateRunNotification(notifText(session.liveStats()));
-    notifTimer = setInterval(() => updateRunNotification(notifText(session.liveStats())), 2000);
+    notifTimer = setInterval(() => {
+      session.tickAutoPause();
+      updateRunNotification(notifText(session.liveStats()));
+    }, 2000);
     return true;
   } catch (e) {
     console.log("[perun] watchPositionAsync failed:", e);
@@ -273,6 +359,8 @@ export function useGpsProbe(enabled: boolean): GpsStatus {
 export interface UseRecorder {
   isRecording: boolean;
   isPaused: boolean;
+  /** True when the pause was triggered automatically (you stopped moving). */
+  isAutoPaused: boolean;
   points: GeoPoint[];
   liveStats: LiveStats;
   permissionDenied: boolean;
@@ -286,6 +374,7 @@ export interface UseRecorder {
 export function useRecorder(): UseRecorder {
   const [isRecording, setIsRecording] = useState(session.recording);
   const [isPaused, setIsPaused] = useState(session.paused);
+  const [isAutoPaused, setIsAutoPaused] = useState(session.autoPaused);
   const [points, setPoints] = useState<GeoPoint[]>(session.points.slice());
   const [liveStats, setLiveStats] = useState<LiveStats>(session.liveStats());
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -309,6 +398,7 @@ export function useRecorder(): UseRecorder {
       setLiveStats(session.liveStats());
       setIsRecording(session.recording);
       setIsPaused(session.paused);
+      setIsAutoPaused(session.autoPaused);
     });
   }, []);
 
@@ -328,7 +418,7 @@ export function useRecorder(): UseRecorder {
     setPermissionDenied(!ok);
     if (ok) {
       setPoints([]); setLiveStats(session.liveStats());
-      setIsRecording(true); setIsPaused(false);
+      setIsRecording(true); setIsPaused(false); setIsAutoPaused(false);
     }
     return ok;
   }, []);
@@ -340,12 +430,13 @@ export function useRecorder(): UseRecorder {
     const track = await stopRecording();
     setIsRecording(false);
     setIsPaused(false);
+    setIsAutoPaused(false);
     setLiveStats(session.liveStats());
     return track;
   }, []);
 
   return {
-    isRecording, isPaused, points, liveStats, permissionDenied,
+    isRecording, isPaused, isAutoPaused, points, liveStats, permissionDenied,
     sport: session.sport, start, pause, resume, stop,
   };
 }
