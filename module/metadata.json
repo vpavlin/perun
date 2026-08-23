@@ -10,7 +10,7 @@
   "icon": "qml/icons/icon.png",
   "view": "qml/Main.qml",
   "dependencies": [
-    "delivery_module"
+    "loam_core"
   ],
   "codegen": {
     "rep": "src/perun_analytics.rep"

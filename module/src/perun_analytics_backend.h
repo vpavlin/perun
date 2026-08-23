@@ -19,7 +19,7 @@ class QNetworkAccessManager;
 /**
  * @brief UI backend for Perun Analytics (universal authoring model).
  *
- * Runs sync over the `delivery_module` as **gzipped GPX**, split into
+ * Runs sync over the `loam_core` transport facade as **gzipped GPX**, split into
  * TRACK_CHUNK messages when over the Waku budget. On receipt the backend
  * reassembles the chunks, gunzips, parses the GPX, computes summary + per-km
  * splits (run_analytics.h) and persists both the computed run and the gzipped

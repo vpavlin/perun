@@ -218,71 +218,73 @@ void PerunAnalyticsBackend::ingestSealed(const QByteArray &raw) {
 }
 
 void PerunAnalyticsBackend::bootstrap() {
-  modules().delivery_module.on(
-      "connectionStateChanged", [this](const QVariantList &data) {
-        if (!data.isEmpty() && m_nodeReady)
-          setStatus(data.at(0).toString());
-      });
-
-  // Both legacy plain relay AND SDS reliable-channel receive route through the
-  // same handler; the phone (loam-transport) sends over channels.
+  // Receive + readiness via the loam_core FACADE (ADR 0015; kym/qaku parity).
+  // loam_core owns the delivery node + bearer(s), dedups across them, and hands us
+  // the payload as base64 of the ONCE-decoded sealed bytes — byte-identical to what
+  // perun's OLD channel path received (base64 TEXT of the sealed bytes). We feed it
+  // straight into ingestSealed, which keeps its raw/single/double-base64 peel (the
+  // phone's loam-transport wire is double-base64, legacy relay single). The two old
+  // receive paths (raw relay + SDS channel) collapse into this one `received` event;
+  // its payloadB64 is a string, so data.at(2).toByteArray() yields the base64 text.
   auto onSealed = [this](const QVariantList &data) {
     if (data.size() >= 3)
       ingestSealed(data.at(2).toByteArray());
   };
-  modules().delivery_module.on("messageReceived", onSealed);
-  modules().delivery_module.on("channelMessageReceived", onSealed);
+  modules().loam_core.on("received", onSealed);
 
-  // FLEET = logos.test (cluster 2). logos.dev migrated to cluster 3 and breaks
-  // fresh joins, so both the phone and this node pin the logos.test entryNodes
-  // (same set kym/qaku use) or they never mesh.
-  const QJsonArray entryNodes{
-      "/dns4/node-01.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmQ9X2xDfPG3uL77V9piYDhjq14JhKCtcmNYsTMKNqrKCj",
-      "/dns4/node-02.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmB8NYprrfQrgWVzsJtYWkfjsXbmJEGNMG6othXsQ53BwG",
-      "/dns4/node-01.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmF8WtwGPmeGHgYAX2277jHgy5cW9F7zsB8EqUjBZQAZQ3",
-      "/dns4/node-02.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmUuXhUW9bdJpzN1kfDziFiUZo4bszTk66cvr7uuyCHXR7",
-      "/dns4/node-01.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmL3oU95jh1BZHozn3uNhx8HEneirgr8M1jEAapzXGDqRF",
-      "/dns4/node-02.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAm28CoBZjpyxsanC8tQpbvZ7bZJnVYuB1EgFzb571qpWsV",
-  };
-  const QJsonObject cfg{{"logLevel", "INFO"},
-                        {"mode", "Core"},
-                        {"preset", "logos.test"},
-                        {"relay", true},
-                        {"entryNodes", entryNodes}};
+  // Readiness: loam_core.start() returns early (async node bringup), so the node is
+  // actually up only when statusChanged reports "Connected". That replaces the old
+  // synchronous createNode→start→subscribe success path: mark ready, join the derived
+  // topic (loam_core.join subscribes the content topic + opens the SDS channel with
+  // our senderId), surface the paired status, and (test) autopublish.
+  modules().loam_core.on("statusChanged", [this](const QVariantList &data) {
+    if (data.isEmpty())
+      return;
+    const QString s = data.at(0).toString();
+    if (s == QLatin1String("Connected") && !m_nodeReady) {
+      m_nodeReady = true;
+      modules().loam_core.join(m_topic);
+      setReady(true);
+      // Never surface the derived topic (secret-adjacent) — the fingerprint PROP is
+      // the user-facing pairing identity.
+      setStatus(QStringLiteral("Connected · paired"));
+      logEvent("node ready on derived topic");
+      if (qEnvironmentVariableIsSet("PERUN_TEST_AUTOPUBLISH")) {
+        logEvent("PERUN_TEST_AUTOPUBLISH set — publishing a sample run in 12s");
+        QTimer::singleShot(12000, [this]() { publishSampleRun(); });
+      }
+    } else if (m_nodeReady) {
+      setStatus(s);
+    }
+  });
+
+  // FLEET = logos.test (cluster 2). delivery v0.2.0 uses the LAYERED createNode shape
+  // {mode, preset, messagingOverrides:{...}}; the logos.test preset supplies the fleet
+  // discv5 bootstrap, so we do NOT pin bare entryNodes (v0.2.0's strict parser rejects
+  // top-level WakuNodeConf keys, and discv5-udp-port is REQUIRED or the node stays at 0
+  // peers — the same canonical cfg kym/qaku use). useChannels/hubMode are loam-only flags
+  // loam_core strips before forwarding the rest to the delivery node verbatim: perun
+  // always rides SDS Reliable Channels; hubMode stays false (perun is never a headless hub).
+  const QJsonObject cfg{
+      {"mode", "Core"},
+      {"preset", "logos.test"},
+      {"messagingOverrides", QJsonObject{{"logLevel", "INFO"},
+                                         {"tcp-port", 30303},
+                                         {"discv5-udp-port", 9000}}},
+      {"useChannels", true},
+      {"hubMode", qEnvironmentVariableIsSet("PERUN_HUB")}};
   const QString cfgJson =
       QString::fromUtf8(QJsonDocument(cfg).toJson(QJsonDocument::Compact));
+  logEvent("bootstrap cfg=" + cfgJson.toStdString());
 
-  LogosResult created = modules().delivery_module.createNode(cfgJson);
-  if (created.success) {
-    LogosResult started = modules().delivery_module.start();
-    if (!started.success)
-      logEvent("start failed: " + started.getError().toStdString());
-  } else {
-    logEvent("createNode failed (may already be running): " +
-             created.getError().toStdString());
-  }
-
-  LogosResult sub = modules().delivery_module.subscribe(m_topic);
-  if (!sub.success) {
-    setStatus(QStringLiteral("subscribe failed: %1").arg(sub.getError()));
-    return;
-  }
-  // Open the SDS reliable channel on the same topic (channelId == contentTopic)
-  // so we receive the phone's channel-framed CHUNKs and can channelSend back.
-  modules().delivery_module.channelCreate(m_topic, m_topic,
-                                          QStringLiteral("perun-desktop"));
-
-  m_nodeReady = true;
-  setReady(true);
-  // Never surface the derived topic (secret-adjacent) — the fingerprint PROP is
-  // the user-facing pairing identity.
-  setStatus(QStringLiteral("Connected · paired"));
-  logEvent("node ready on derived topic");
-
-  if (qEnvironmentVariableIsSet("PERUN_TEST_AUTOPUBLISH")) {
-    logEvent("PERUN_TEST_AUTOPUBLISH set — publishing a sample run in 12s");
-    QTimer::singleShot(12000, [this]() { publishSampleRun(); });
-  }
+  // Route the node through the loam_core FACADE. One start() owns createNode+start;
+  // readiness arrives via the statusChanged("Connected") handler above, not from here.
+  // setSenderId first so join()'s SDS channel uses our id (was channelCreate's
+  // "perun-desktop" senderId). Both return a status string ("" ok / error text).
+  modules().loam_core.setSenderId(QStringLiteral("perun-desktop"));
+  const QString err = modules().loam_core.start(cfgJson);
+  if (!err.isEmpty())
+    logEvent("loam_core.start returned: " + err.toStdString());
 }
 
 QString PerunAnalyticsBackend::publishSampleRun() {
@@ -323,13 +325,15 @@ QString PerunAnalyticsBackend::sendChunks(const QString &runId, int rev,
     const QByteArray sealed = fromBytes(perun::seal(
         m_id, sealId, toBytes(QJsonDocument(env).toJson(QJsonDocument::Compact)),
         m_topic.toStdString()));
-    // channelSend to match the phone's SDS reliable-channel wire: pass
-    // base64(sealed); the delivery FFI base64s once more (double-base64).
-    LogosResult r =
-        modules().delivery_module.channelSend(m_topic, sealed.toBase64());
-    if (!r.success) {
-      logEvent("send chunk failed: " + r.getError().toStdString());
-      return r.getError();
+    // loam_core.sendSealed takes the base64 TEXT of the sealed bytes: it decodes
+    // once to the sealed bytes, then its delivery bearer re-encodes + lets delivery
+    // add the outer wire layer, preserving the SINGLE-base64 seam the phone expects.
+    // Returns a status string ("" ok / error text).
+    const QString err =
+        modules().loam_core.sendSealed(m_topic, QString::fromLatin1(sealed.toBase64()));
+    if (!err.isEmpty()) {
+      logEvent("send chunk failed: " + err.toStdString());
+      return err;
     }
   }
   logEvent("published " + std::to_string(total) + " chunk(s), " +
@@ -465,7 +469,6 @@ QString PerunAnalyticsBackend::exportGpx(QString runId) {
 }
 
 QString PerunAnalyticsBackend::resetPairing() {
-  const QString oldTopic = m_topic;
   const perun::Bytes secret = perun::randomSecret();
   if (secret.size() != 32)
     return QStringLiteral("failed to generate secret");
@@ -480,16 +483,11 @@ QString PerunAnalyticsBackend::resetPairing() {
   }
   applyIdentity(secret);
 
-  // Move the subscription to the new derived topic.
-  if (m_nodeReady) {
-    if (!oldTopic.isEmpty())
-      modules().delivery_module.unsubscribe(oldTopic);
-    LogosResult sub = modules().delivery_module.subscribe(m_topic);
-    if (!sub.success)
-      return sub.getError();
-    modules().delivery_module.channelCreate(m_topic, m_topic,
-                                            QStringLiteral("perun-desktop"));
-  }
+  // Join the new derived topic. loam_core exposes no leave/unsubscribe; join()ing
+  // the new topic is enough — messages on the old topic no longer decrypt with the
+  // new pairing key, so ingestSealed silently drops them (bad AEAD tag).
+  if (m_nodeReady)
+    modules().loam_core.join(m_topic);
   logEvent("pairing reset — old phones unpaired");
   return QString();
 }
