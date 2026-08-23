@@ -6,7 +6,7 @@
 // map dot, the elevation marker and the featured annotation are all derived from it.
 import React, { useMemo, useState } from "react";
 import {
-  Dimensions, Modal, Pressable, ScrollView, StyleSheet, Text, View,
+  Dimensions, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, View,
 } from "react-native";
 import { Run } from "../lib/types";
 import { Annotation, useAnnotations } from "../lib/annotations";
@@ -35,6 +35,8 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
 
   // Playhead distance (m). Starts at the first annotation if there is one, else 0.
   const [d, setD] = useState(0);
+  // Full-screen photo viewer (tap the featured photo to expand).
+  const [photoView, setPhotoView] = useState<Annotation | null>(null);
 
   // Annotations placed on the distance axis (by the point-time they were pinned at),
   // sorted along the route. Filter out any without a resolvable position.
@@ -110,7 +112,10 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
                       </Text>
                     </View>
                     {featured.a.kind === "photo" && (
-                      <View style={styles.media}><PhotoFull a={featured.a} /></View>
+                      <Pressable style={styles.media} onPress={() => setPhotoView(featured!.a)}>
+                        <PhotoFull a={featured.a} />
+                        <Text style={styles.expandHint}>⤢ Tap to expand</Text>
+                      </Pressable>
                     )}
                     {featured.a.kind === "voice" && <VoicePlayer a={featured.a} />}
                     {!!featured.a.text && <Text style={styles.cardText}>{featured.a.text}</Text>}
@@ -141,6 +146,14 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
             </>
           )}
         </ScrollView>
+
+        {/* Full-screen photo viewer */}
+        <Modal visible={!!photoView} transparent animationType="fade" onRequestClose={() => setPhotoView(null)}>
+          <Pressable style={styles.photoBackdrop} onPress={() => setPhotoView(null)}>
+            {photoView && <PhotoFull a={photoView} />}
+            <Text style={styles.photoClose}>Tap to close</Text>
+          </Pressable>
+        </Modal>
       </View>
     </Modal>
   );
@@ -156,7 +169,9 @@ function Stat({ k, v }: { k: string; v: string }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.bg, paddingTop: 8 },
+  // Clear the status bar — the modal fills the screen (as the app's other screens do
+  // via SafeAreaView + StatusBar.currentHeight), else the header hides behind it.
+  root: { flex: 1, backgroundColor: theme.bg, paddingTop: (StatusBar.currentHeight ?? 0) + 8 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10 },
   title: { color: theme.text, fontSize: 18, fontWeight: "700", flexShrink: 1, paddingRight: 12 },
   close: { color: theme.primary, fontSize: 16, fontWeight: "600" },
@@ -173,7 +188,8 @@ const styles = StyleSheet.create({
   cardHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
   cardIcon: { fontSize: 18 },
   cardWhen: { color: theme.textSecondary, fontSize: 13, fontWeight: "600" },
-  media: { height: 260, alignItems: "center", justifyContent: "center", marginVertical: 6 },
+  media: { height: 360, alignItems: "center", justifyContent: "center", marginVertical: 6 },
+  expandHint: { position: "absolute", bottom: 6, right: 8, color: "#fff", fontSize: 11, fontWeight: "600", backgroundColor: "rgba(0,0,0,0.55)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, overflow: "hidden" },
   cardText: { color: theme.text, fontSize: 15, lineHeight: 21, marginTop: 6 },
   cardEmpty: { color: theme.textTertiary, fontSize: 14, lineHeight: 20 },
   timeline: { paddingHorizontal: 16, paddingVertical: 14, gap: 8 },
@@ -181,4 +197,6 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: theme.elevated, borderColor: theme.primary },
   chipText: { color: theme.textSecondary, fontSize: 13, fontWeight: "600" },
   chipTextOn: { color: theme.primary },
+  photoBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.94)", alignItems: "center", justifyContent: "center" },
+  photoClose: { color: "#fff", fontSize: 14, marginTop: 16, opacity: 0.8 },
 });
