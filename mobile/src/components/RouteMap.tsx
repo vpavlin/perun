@@ -3,7 +3,9 @@
 // on disk and fetched at most once; if none load (offline / fetch error) we fall
 // back to exactly the old behaviour — the track on the plain dark background.
 import React from "react";
-import { GestureResponderEvent, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  GestureResponderEvent, PanResponder, PanResponderInstance, Pressable, StyleSheet, Text, View,
+} from "react-native";
 import Svg, { Circle, Image as SvgImage, Polyline, Rect } from "react-native-svg";
 import { buildLayout, getTile, MapLayout, TILE_SIZE } from "../lib/tiles";
 import { GeoPoint } from "../lib/types";
@@ -63,6 +65,8 @@ export function RouteMap({
   pickMode = false,
   onPickPoint,
   pickedPoint,
+  playhead,
+  onScrubIndex,
 }: {
   points: GeoPoint[];
   width: number;
@@ -85,9 +89,42 @@ export function RouteMap({
   onPickPoint?: (p: GeoPoint) => void;
   /** A candidate point being placed (shown as a hollow ring). */
   pickedPoint?: GeoPoint | null;
+  /** Replay playhead — drawn as a large ring at this point. */
+  playhead?: GeoPoint | null;
+  /** When set, dragging anywhere on the map reports the nearest track point index
+   *  continuously (Replay scrub). Takes precedence over pickMode's tap-to-place. */
+  onScrubIndex?: (i: number) => void;
 }) {
   const fit = fitPoints && fitPoints.length >= 2 ? fitPoints : points;
   const layout = React.useMemo(() => buildLayout(fit, width, height), [fit, width, height]);
+
+  // --- Replay scrub: a drag anywhere on the map maps to the nearest track point.
+  // The responder reads the latest layout/points via a ref so it can be created once
+  // (PanResponder must not be rebuilt each render), yet never sees stale data.
+  const scrubRef = React.useRef<{ layout: MapLayout | null; points: GeoPoint[]; cb?: (i: number) => void }>({ layout: null, points: [] });
+  scrubRef.current = { layout, points, cb: onScrubIndex };
+  const handleScrub = React.useCallback((e: GestureResponderEvent) => {
+    const s = scrubRef.current;
+    if (!s.layout || !s.cb) return;
+    const { locationX, locationY } = e.nativeEvent;
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < s.points.length; i++) {
+      const [px, py] = s.layout.project(s.points[i]);
+      const d = (px - locationX) ** 2 + (py - locationY) ** 2;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    s.cb(best);
+  }, []);
+  const panRef = React.useRef<PanResponderInstance | null>(null);
+  if (!panRef.current) {
+    panRef.current = PanResponder.create({
+      onStartShouldSetPanResponder: () => !!scrubRef.current.cb,
+      onMoveShouldSetPanResponder: () => !!scrubRef.current.cb,
+      onPanResponderGrant: handleScrub,
+      onPanResponderMove: handleScrub,
+    });
+  }
   // Skip the tile fetch entirely when the basemap is hidden — no network, and
   // the effect's key never changes so it stays quiet.
   const uris = useTiles(hideBasemap ? null : layout);
@@ -172,10 +209,23 @@ export function RouteMap({
             </React.Fragment>
           );
         })}
+        {/* Replay playhead — a bright ring travelling the route as you scrub. */}
+        {playhead && (() => {
+          const [px, py] = layout.project(playhead);
+          return (
+            <React.Fragment>
+              <Circle cx={px} cy={py} r={11} fill={theme.primary} opacity={0.22} />
+              <Circle cx={px} cy={py} r={6} fill={theme.primary} stroke={theme.bg} strokeWidth={2} />
+            </React.Fragment>
+          );
+        })()}
       </Svg>
+      {/* Replay scrub layer — a drag anywhere maps to the nearest track point. Mounted
+          only when scrubbing so it never steals touches in normal viewing. */}
+      {onScrubIndex && <View style={StyleSheet.absoluteFill} {...panRef.current.panHandlers} />}
       {/* Transparent tap layer for placing a point — only mounted in pick mode so it
           never steals touches from the map controls in normal viewing. */}
-      {pickMode && <Pressable style={StyleSheet.absoluteFill} onPress={onTap} />}
+      {pickMode && !onScrubIndex && <Pressable style={StyleSheet.absoluteFill} onPress={onTap} />}
       {/* Required by the OSM tile usage policy whenever tiles are shown. */}
       {hasTiles && <Text style={styles.attribution}>© OpenStreetMap contributors</Text>}
     </View>

@@ -19,6 +19,7 @@ import { deliveryAvailable } from "./src/lib/delivery";
 import { startAnnotationReceive, useAnnotations } from "./src/lib/annotations";
 import { RunAnnotations } from "./src/components/Annotations";
 import { QuickAnnotate } from "./src/components/QuickAnnotate";
+import { ReplayMode } from "./src/components/ReplayMode";
 import { SharedNodeStatus } from "./src/lib/loam-transport-pkg/src/SharedNodeStatus";
 import { RouteMap } from "./src/components/RouteMap";
 import { ElevationChart } from "./src/components/ElevationChart";
@@ -494,6 +495,7 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
   const annotations = useAnnotations(run.id);
   const [showPins, setShowPins] = useState(true);
   const mapMarkers = annotations.map((a) => ({ id: a.id, lat: a.lat, lon: a.lon, kind: a.kind }));
+  const [replay, setReplay] = useState(false);
   const share = async () => {
     try { await exportRun(run); }
     catch (e) { Alert.alert("Export failed", e instanceof Error ? e.message : String(e)); }
@@ -590,6 +592,14 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
         </Pressable>
       )}
 
+      {/* Replay: relive the run — drag a playhead along the route, annotations surface. */}
+      {run.track.points.length >= 2 && (
+        <Pressable style={[styles.exportBtn, styles.replayBtn]} onPress={() => setReplay(true)}>
+          <Text style={styles.exportText}>▶ Replay run</Text>
+        </Pressable>
+      )}
+      <ReplayMode run={run} visible={replay} onClose={() => setReplay(false)} />
+
       {/* Journey annotations: pinned notes/photos/voice on this run's route. Lives
           OUTSIDE the shot card so pins + the composer never leak into a shared image. */}
       <RunAnnotations run={run} />
@@ -684,5 +694,6 @@ const styles = StyleSheet.create({
   exportBtn: { marginTop: 12, borderWidth: 1, borderColor: theme.border, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
   exportText: { color: theme.text, fontSize: 15, fontWeight: "600" },
   syncBtn: { backgroundColor: theme.primary, borderColor: theme.primary },
+  replayBtn: { borderColor: theme.primary },
   deleteBtn: { marginTop: 20, marginBottom: 8, borderColor: theme.error },
 });

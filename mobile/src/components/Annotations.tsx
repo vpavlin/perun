@@ -1,7 +1,8 @@
 // Journey annotations UI: capture (text / photo / voice) + a pinned list + route
-// markers, for one saved run. Photos/voice are sealed and uploaded to the blob server
-// (blob.ts); only the small metadata syncs over Delivery. Everything is offline-first —
-// a text note is authored+stored locally with no server at all.
+// markers, for one saved run. LOCAL-FIRST: every note is stored on-device immediately
+// (blob.ts for media, AsyncStorage for metadata) with no server needed; media is then
+// best-effort replicated and only the small metadata syncs over Delivery. Capture goes
+// through the shared useCapture hook.
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator, Alert, Dimensions, Image, Modal, Pressable, StyleSheet, Text, TextInput, View,
@@ -254,14 +255,14 @@ function PhotoThumb({ a, onPress }: { a: Annotation; onPress: () => void }) {
   );
 }
 
-function PhotoFull({ a }: { a: Annotation }) {
+export function PhotoFull({ a }: { a: Annotation }) {
   const { uri, failed, loading } = useBlobUri(a.blobId, a.mime);
   if (loading) return <ActivityIndicator color="#fff" />;
   if (!uri || failed) return <Text style={styles.photoClose}>Photo not on this device yet (author is offline)</Text>;
   return <Image source={{ uri }} style={styles.photoFull} resizeMode="contain" />;
 }
 
-function VoicePlayer({ a }: { a: Annotation }) {
+export function VoicePlayer({ a }: { a: Annotation }) {
   const { uri, failed, loading } = useBlobUri(a.blobId, a.mime);
   const player = useAudioPlayer(uri ?? undefined);
   const status = useAudioPlayerStatus(player);

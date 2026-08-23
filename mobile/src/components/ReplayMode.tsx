@@ -1,0 +1,184 @@
+// Replay mode — "relive the run". Drag a playhead along the route (on the map, or on
+// the elevation strip; the two stay synced) and the annotation you're passing surfaces
+// with the stats at that point. Manual scrub only for v1 (auto-play is a follow-up).
+//
+// The playhead is a single value: cumulative distance in metres (see lib/route). The
+// map dot, the elevation marker and the featured annotation are all derived from it.
+import React, { useMemo, useState } from "react";
+import {
+  Dimensions, Modal, Pressable, ScrollView, StyleSheet, Text, View,
+} from "react-native";
+import { Run } from "../lib/types";
+import { Annotation, useAnnotations } from "../lib/annotations";
+import {
+  cumulativeDistances, totalDistance, pointAtDistance, distanceForTime,
+} from "../lib/route";
+import { fmtDist, fmtDur, fmtElev } from "../lib/analytics";
+import { RouteMap } from "./RouteMap";
+import { ElevationChart } from "./ElevationChart";
+import { PhotoFull, VoicePlayer } from "./Annotations";
+import { theme } from "../theme";
+
+const KIND_ICON: Record<string, string> = { text: "💬", photo: "📷", voice: "🎙️" };
+const fmtClock = (ms: number) => {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boolean; onClose: () => void }) {
+  const points = run.track.points;
+  const annotations = useAnnotations(run.id);
+  const cum = useMemo(() => cumulativeDistances(points), [points]);
+  const total = totalDistance(cum);
+  const startT = points[0]?.t ?? 0;
+
+  // Playhead distance (m). Starts at the first annotation if there is one, else 0.
+  const [d, setD] = useState(0);
+
+  // Annotations placed on the distance axis (by the point-time they were pinned at),
+  // sorted along the route. Filter out any without a resolvable position.
+  const placed = useMemo(() => {
+    return annotations
+      .map((a) => ({ a, dist: distanceForTime(points, cum, a.t) }))
+      .sort((x, y) => x.dist - y.dist);
+  }, [annotations, points, cum]);
+
+  const head = pointAtDistance(points, cum, d);
+  const elapsedS = head ? Math.max(0, (head.t - startT) / 1000) : 0;
+
+  // Featured annotation = the nearest one to the playhead; "active" when close enough
+  // that you're effectively standing on it (2% of the route, min 40 m).
+  const threshold = Math.max(40, total * 0.02);
+  let featured: { a: Annotation; dist: number } | null = null;
+  let bestGap = Infinity;
+  for (const p of placed) {
+    const gap = Math.abs(p.dist - d);
+    if (gap < bestGap) { bestGap = gap; featured = p; }
+  }
+  const active = !!featured && bestGap <= threshold;
+
+  const w = Dimensions.get("window").width - 32;
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View style={styles.root}>
+        <View style={styles.header}>
+          <Text style={styles.title} numberOfLines={1}>Replay · {run.name}</Text>
+          <Pressable onPress={onClose} hitSlop={12}><Text style={styles.close}>Done</Text></Pressable>
+        </View>
+
+        <ScrollView contentContainerStyle={{ paddingBottom: 32 }} showsVerticalScrollIndicator={false}>
+          {points.length < 2 ? (
+            <Text style={styles.empty}>This run has no route to replay.</Text>
+          ) : (
+            <>
+              {/* Map — full route, playhead, drag to scrub. */}
+              <View style={[styles.mapBox, { width: w, height: 300 }]}>
+                <RouteMap
+                  points={points}
+                  width={w}
+                  height={300}
+                  markers={placed.map((p) => ({ id: p.a.id, lat: p.a.lat, lon: p.a.lon, kind: p.a.kind }))}
+                  highlightId={featured?.a.id}
+                  playhead={head}
+                  onScrubIndex={(i) => setD(cum[i] ?? 0)}
+                />
+              </View>
+              <Text style={styles.hint}>Drag on the route or the elevation strip to move along the run.</Text>
+
+              {/* Live stats at the playhead. */}
+              <View style={styles.statRow}>
+                <Stat k="Distance" v={fmtDist(d)} />
+                <Stat k="Time" v={fmtDur(elapsedS)} />
+                <Stat k="Elevation" v={head?.alt != null ? fmtElev(head.alt) : "—"} />
+              </View>
+
+              {/* Elevation strip — also a scrubber; playhead shares the map's axis. */}
+              <View style={[styles.elevBox, { width: w, height: 96 }]}>
+                <ElevationChart points={points} width={w} height={96} playheadD={d} axisMaxD={total} onScrubD={setD} />
+              </View>
+
+              {/* Featured annotation — what you're passing right now. */}
+              <View style={[styles.card, active && styles.cardActive]}>
+                {featured ? (
+                  <>
+                    <View style={styles.cardHead}>
+                      <Text style={styles.cardIcon}>{KIND_ICON[featured.a.kind] ?? "•"}</Text>
+                      <Text style={styles.cardWhen}>
+                        {active ? "● at this point" : `${fmtDist(featured.dist)} · ${fmtClock(featured.a.t)}`}
+                      </Text>
+                    </View>
+                    {featured.a.kind === "photo" && (
+                      <View style={styles.media}><PhotoFull a={featured.a} /></View>
+                    )}
+                    {featured.a.kind === "voice" && <VoicePlayer a={featured.a} />}
+                    {!!featured.a.text && <Text style={styles.cardText}>{featured.a.text}</Text>}
+                    {featured.a.kind === "text" && !featured.a.text && <Text style={styles.cardText}>(empty note)</Text>}
+                  </>
+                ) : (
+                  <Text style={styles.cardEmpty}>
+                    No annotations on this run yet — scrub the route to relive it, or pin notes from the run screen.
+                  </Text>
+                )}
+              </View>
+
+              {/* Timeline — jump straight to any annotation. */}
+              {placed.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeline}>
+                  {placed.map((p) => {
+                    const on = p.a.id === featured?.a.id;
+                    return (
+                      <Pressable key={p.a.id} style={[styles.chip, on && styles.chipOn]} onPress={() => setD(p.dist)}>
+                        <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                          {KIND_ICON[p.a.kind] ?? "•"} {fmtDist(p.dist)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </>
+          )}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+function Stat({ k, v }: { k: string; v: string }) {
+  return (
+    <View style={styles.stat}>
+      <Text style={styles.statK}>{k}</Text>
+      <Text style={styles.statV}>{v}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: theme.bg, paddingTop: 8 },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10 },
+  title: { color: theme.text, fontSize: 18, fontWeight: "700", flexShrink: 1, paddingRight: 12 },
+  close: { color: theme.primary, fontSize: 16, fontWeight: "600" },
+  empty: { color: theme.textTertiary, textAlign: "center", marginTop: 60, fontSize: 15 },
+  mapBox: { backgroundColor: theme.elevated, borderRadius: 10, borderWidth: 1, borderColor: theme.border, overflow: "hidden", alignItems: "center", justifyContent: "center", marginHorizontal: 16 },
+  hint: { color: theme.textTertiary, fontSize: 12, marginTop: 8, marginHorizontal: 16 },
+  statRow: { flexDirection: "row", justifyContent: "space-around", marginTop: 14, paddingHorizontal: 16 },
+  stat: { alignItems: "center" },
+  statK: { color: theme.textTertiary, fontSize: 11, letterSpacing: 0.5 },
+  statV: { color: theme.text, fontSize: 22, fontWeight: "700", marginTop: 2 },
+  elevBox: { backgroundColor: theme.elevated, borderRadius: 10, borderWidth: 1, borderColor: theme.border, overflow: "hidden", marginHorizontal: 16, marginTop: 14 },
+  card: { marginHorizontal: 16, marginTop: 16, backgroundColor: theme.card, borderRadius: 12, borderWidth: 1, borderColor: theme.border, padding: 14 },
+  cardActive: { borderColor: theme.primary },
+  cardHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+  cardIcon: { fontSize: 18 },
+  cardWhen: { color: theme.textSecondary, fontSize: 13, fontWeight: "600" },
+  media: { height: 260, alignItems: "center", justifyContent: "center", marginVertical: 6 },
+  cardText: { color: theme.text, fontSize: 15, lineHeight: 21, marginTop: 6 },
+  cardEmpty: { color: theme.textTertiary, fontSize: 14, lineHeight: 20 },
+  timeline: { paddingHorizontal: 16, paddingVertical: 14, gap: 8 },
+  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
+  chipOn: { backgroundColor: theme.elevated, borderColor: theme.primary },
+  chipText: { color: theme.textSecondary, fontSize: 13, fontWeight: "600" },
+  chipTextOn: { color: theme.primary },
+});
