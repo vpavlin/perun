@@ -266,7 +266,7 @@ export default function App() {
           )}
         </View>
         {/* Annotate the run live — pinned to your current point, stored on-device. */}
-        <QuickAnnotate runId={rec.runId} points={rec.points} />
+        <QuickAnnotate runId={rec.runId} point={rec.points[rec.points.length - 1] ?? null} />
         {hasAlt && (
           <>
             <Text style={styles.sectionLabel}>ELEVATION · +{fmtElev(liveSummary.elevGainM)}</Text>

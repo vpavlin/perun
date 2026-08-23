@@ -6,16 +6,17 @@
 // map dot, the elevation marker and the featured annotation are all derived from it.
 import React, { useMemo, useState } from "react";
 import {
-  Dimensions, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, View,
+  Alert, Dimensions, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, View,
 } from "react-native";
 import { Run } from "../lib/types";
-import { Annotation, useAnnotations } from "../lib/annotations";
+import { Annotation, useAnnotations, deleteAnnotation } from "../lib/annotations";
 import {
   cumulativeDistances, totalDistance, pointAtDistance, distanceForTime,
 } from "../lib/route";
 import { fmtDist, fmtDur, fmtElev } from "../lib/analytics";
 import { RouteMap } from "./RouteMap";
 import { ElevationChart } from "./ElevationChart";
+import { QuickAnnotate } from "./QuickAnnotate";
 import { PhotoFull, VoicePlayer } from "./Annotations";
 import { theme } from "../theme";
 
@@ -37,6 +38,15 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
   const [d, setD] = useState(0);
   // Full-screen photo viewer (tap the featured photo to expand).
   const [photoView, setPhotoView] = useState<Annotation | null>(null);
+  // Zoom the map to a window around the playhead for precise pin placement.
+  const [zoom, setZoom] = useState(false);
+  const [zoomR, setZoomR] = useState(150); // crop radius in metres either side of the playhead
+
+  const zoomPts = useMemo(() => {
+    if (!zoom) return undefined;
+    const sub = points.filter((_, i) => cum[i] >= d - zoomR && cum[i] <= d + zoomR);
+    return sub.length >= 2 ? sub : undefined; // fall back to the full route near the ends
+  }, [zoom, d, zoomR, points, cum]);
 
   // Annotations placed on the distance axis (by the point-time they were pinned at),
   // sorted along the route. Filter out any without a resolvable position.
@@ -59,6 +69,13 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
     if (gap < bestGap) { bestGap = gap; featured = p; }
   }
   const active = !!featured && bestGap <= threshold;
+
+  const confirmDelete = (a: Annotation) => {
+    Alert.alert("Delete annotation?", "Removes it for everyone (an append-only tombstone).", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => { void deleteAnnotation(a); } },
+    ]);
+  };
 
   const w = Dimensions.get("window").width - 32;
 
@@ -84,8 +101,28 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
                   markers={placed.map((p) => ({ id: p.a.id, lat: p.a.lat, lon: p.a.lon, kind: p.a.kind }))}
                   highlightId={featured?.a.id}
                   playhead={head}
+                  fitPoints={zoomPts}
                   onScrubIndex={(i) => setD(cum[i] ?? 0)}
                 />
+              </View>
+              {/* Zoom crops the map to a window around the playhead and follows it as you
+                  scrub — so you can pin on the exact spot. */}
+              <View style={styles.zoomRow}>
+                <Pressable style={[styles.zoomToggle, zoom && styles.zoomToggleOn]} onPress={() => setZoom((v) => !v)}>
+                  <Text style={[styles.zoomToggleText, zoom && styles.zoomToggleTextOn]}>
+                    {zoom ? `◉ Zoomed ±${zoomR} m` : "◎ Zoom to playhead"}
+                  </Text>
+                </Pressable>
+                {zoom && (
+                  <>
+                    <Pressable style={styles.zoomBtn} onPress={() => setZoomR((r) => Math.min(1500, Math.round(r * 1.6)))}>
+                      <Text style={styles.zoomBtnText}>–</Text>
+                    </Pressable>
+                    <Pressable style={styles.zoomBtn} onPress={() => setZoomR((r) => Math.max(30, Math.round(r / 1.6)))}>
+                      <Text style={styles.zoomBtnText}>+</Text>
+                    </Pressable>
+                  </>
+                )}
               </View>
               <Text style={styles.hint}>Drag on the route or the elevation strip to move along the run.</Text>
 
@@ -101,6 +138,14 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
                 <ElevationChart points={points} width={w} height={96} playheadD={d} axisMaxD={total} onScrubD={setD} />
               </View>
 
+              {/* Compose — pin a new note/photo/voice at the EXACT playhead spot. */}
+              <QuickAnnotate
+                runId={run.id}
+                point={head}
+                title="PIN AT THIS SPOT"
+                emptyHint="Scrub to a spot on the route to pin a note here."
+              />
+
               {/* Featured annotation — what you're passing right now. */}
               <View style={[styles.card, active && styles.cardActive]}>
                 {featured ? (
@@ -110,6 +155,10 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
                       <Text style={styles.cardWhen}>
                         {active ? "● at this point" : `${fmtDist(featured.dist)} · ${fmtClock(featured.a.t)}`}
                       </Text>
+                      <View style={{ flex: 1 }} />
+                      <Pressable hitSlop={10} onPress={() => confirmDelete(featured!.a)}>
+                        <Text style={styles.cardDel}>✕</Text>
+                      </Pressable>
                     </View>
                     {featured.a.kind === "photo" && (
                       <Pressable style={styles.media} onPress={() => setPhotoView(featured!.a)}>
@@ -178,6 +227,13 @@ const styles = StyleSheet.create({
   empty: { color: theme.textTertiary, textAlign: "center", marginTop: 60, fontSize: 15 },
   mapBox: { backgroundColor: theme.elevated, borderRadius: 10, borderWidth: 1, borderColor: theme.border, overflow: "hidden", alignItems: "center", justifyContent: "center", marginHorizontal: 16 },
   hint: { color: theme.textTertiary, fontSize: 12, marginTop: 8, marginHorizontal: 16 },
+  zoomRow: { flexDirection: "row", gap: 8, marginTop: 10, marginHorizontal: 16, alignItems: "center" },
+  zoomToggle: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
+  zoomToggleOn: { backgroundColor: theme.elevated, borderColor: theme.primary },
+  zoomToggleText: { color: theme.textSecondary, fontSize: 13, fontWeight: "600" },
+  zoomToggleTextOn: { color: theme.primary },
+  zoomBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border, alignItems: "center", justifyContent: "center" },
+  zoomBtnText: { color: theme.text, fontSize: 20, fontWeight: "700", lineHeight: 22 },
   statRow: { flexDirection: "row", justifyContent: "space-around", marginTop: 14, paddingHorizontal: 16 },
   stat: { alignItems: "center" },
   statK: { color: theme.textTertiary, fontSize: 11, letterSpacing: 0.5 },
@@ -188,6 +244,7 @@ const styles = StyleSheet.create({
   cardHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
   cardIcon: { fontSize: 18 },
   cardWhen: { color: theme.textSecondary, fontSize: 13, fontWeight: "600" },
+  cardDel: { color: theme.textTertiary, fontSize: 16, paddingLeft: 8 },
   media: { height: 360, alignItems: "center", justifyContent: "center", marginVertical: 6 },
   expandHint: { position: "absolute", bottom: 6, right: 8, color: "#fff", fontSize: 11, fontWeight: "600", backgroundColor: "rgba(0,0,0,0.55)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, overflow: "hidden" },
   cardText: { color: theme.text, fontSize: 15, lineHeight: 21, marginTop: 6 },

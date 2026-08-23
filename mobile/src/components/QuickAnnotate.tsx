@@ -12,16 +12,24 @@ import { useAnnotations } from "../lib/annotations";
 import { useCapture } from "../lib/useCapture";
 import { theme } from "../theme";
 
-export function QuickAnnotate({ runId, points }: { runId: string; points: GeoPoint[] }) {
+export function QuickAnnotate({
+  runId, point, title = "ANNOTATE HERE", emptyHint = "Waiting for the first GPS fix…",
+}: {
+  runId: string;
+  /** Where a new annotation is pinned — the live fix while recording, or the Replay
+   *  playhead. Null disables capture (nothing to pin to yet). */
+  point: GeoPoint | null;
+  title?: string;
+  emptyHint?: string;
+}) {
   const cap = useCapture(runId);
   const count = useAnnotations(runId).length;
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
 
-  // The pin is the latest recorded fix, resolved at the moment you tap — so the note
-  // lands where you are now. Null until the first fix arrives (buttons disabled).
-  const here = (): GeoPoint | null => points[points.length - 1] ?? null;
-  const ready = points.length > 0 && !cap.busy;
+  // Resolve the pin at the moment you tap, so it lands exactly where the caller points.
+  const here = (): GeoPoint | null => point;
+  const ready = !!point && !cap.busy;
 
   const onNote = async () => {
     const p = here();
@@ -50,7 +58,7 @@ export function QuickAnnotate({ runId, points }: { runId: string; points: GeoPoi
   return (
     <View style={styles.wrap}>
       <View style={styles.headRow}>
-        <Text style={styles.label}>ANNOTATE HERE</Text>
+        <Text style={styles.label}>{title}</Text>
         {count > 0 && <Text style={styles.count}>{count} pinned</Text>}
       </View>
       <TextInput
@@ -71,7 +79,7 @@ export function QuickAnnotate({ runId, points }: { runId: string; points: GeoPoi
           <Text style={styles.btnText}>🎙 Voice</Text>
         </Pressable>
       </View>
-      {points.length === 0 && <Text style={styles.hint}>Waiting for the first GPS fix…</Text>}
+      {!point && <Text style={styles.hint}>{emptyHint}</Text>}
       {!!cap.busy && (
         <View style={styles.busyRow}>
           <ActivityIndicator color={theme.primary} size="small" />
