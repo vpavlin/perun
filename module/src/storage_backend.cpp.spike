@@ -1,0 +1,83 @@
+// SPIKE REFERENCE — NOT compiled (deliberately `.cpp.spike`, not in CMake).
+//
+// Prototype call sites for depending on the Logos Storage (Codex) module,
+// `storage_module` (github:logos-co/logos-storage-module), the SAME way the backend
+// depends on `loam_core`: declare it in metadata.json dependencies + a flake input, then
+// call `modules().storage_module.*` and subscribe with `.on(event)`.
+//
+// Before turning this into a real `storage_backend.cpp` (add to CMakeLists SOURCES):
+//   1. VERIFY the Qt-caller method signatures/types against the generated proxy — the
+//      names below come from src/storage_module_plugin.h (StdLogosResult/std::string on
+//      the core side); the ui_qml Qt caller surfaces them as QString/value and the exact
+//      arg types (int vs qint64, return handling) must be confirmed.
+//   2. VERIFY SDK/ABI alignment (Perun pins logos-module-builder/0.2.6; storage_module
+//      builds against logos-cpp-sdk feat/logos-result). See docs/spikes/logos-storage-integration.md.
+//   3. Decide CID identity (recommended: keep blobId=sha256(sealed) local + a `storageCid`
+//      sidecar filled after upload) — see the spike doc's "load-bearing finding".
+//
+// These would be methods on PerunAnalyticsBackend (it owns modules() + decryptSealedToCache).
+#include "perun_analytics_backend.h"
+
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+
+// Init + start a Codex node in-process via the dependency, and wire completion events —
+// mirrors how startBlobServer() autostarts the embedded hub, and how the backend wires
+// modules().loam_core.on("received"/"statusChanged").
+void PerunAnalyticsBackend::initStorage() {
+  const QString cfg =
+      QStringLiteral("{\"network\":\"logos.test\",\"data-dir\":\"%1/codex\","
+                     "\"storage-quota\":21474836480,\"listen-port\":0}")
+          .arg(m_dataDir);
+  modules().storage_module.init(cfg); // synchronous: create + configure the node
+
+  modules().storage_module.on("storageStart", [this](const QVariantList &) {
+    m_storageReady = true;
+    logEvent("storage node started");
+  });
+
+  // Upload finished → the event payload carries the Codex CID. In the two-id model this
+  // is where we'd author a `storageCid` sidecar edit against the pending local blobId.
+  modules().storage_module.on("storageUploadDone", [this](const QVariantList &d) {
+    const QString payload = d.isEmpty() ? QString() : d.first().toString();
+    const QJsonObject o = QJsonDocument::fromJson(payload.toUtf8()).object();
+    const QString cid = o.value(QStringLiteral("cid")).toString();
+    logEvent("storage upload done, cid=" + cid.toStdString());
+    // TODO(spike): resolve the pending upload (by sessionId) -> its local blobId, then
+    // record/announce storageCid = cid so peers can fetch it.
+  });
+
+  // Download finished → the sealed bytes are on disk at the requested path; decrypt them
+  // into the display cache exactly like the HTTP path does.
+  modules().storage_module.on("storageDownloadDone", [this](const QVariantList &d) {
+    const QString payload = d.isEmpty() ? QString() : d.first().toString();
+    const QJsonObject o = QJsonDocument::fromJson(payload.toUtf8()).object();
+    const QString file = o.value(QStringLiteral("filePath")).toString();
+    QFile f(file);
+    if (!f.open(QIODevice::ReadOnly))
+      return;
+    const QByteArray sealed = f.readAll();
+    // The caller tracked (cid -> blobId,mime); decryptSealedToCache(blobId, mime, sealed)
+    // then emit mediaReady — shared with the local-first + HTTP paths (ADR 0002).
+  });
+
+  modules().storage_module.start(); // async → storageStart
+}
+
+// Replicate a sealed blob to Codex: stage it as a file and stream-upload. The CID comes
+// back on storageUploadDone (Codex mints it; it is NOT sha256(sealed) — see the doc).
+void PerunAnalyticsBackend::storagePutSealed(const QString &sealedFilePath) {
+  if (!m_storageReady) {
+    logEvent("storage not ready; upload deferred");
+    return;
+  }
+  modules().storage_module.uploadUrl(sealedFilePath, 65536); // 64 KiB chunks
+}
+
+// Fetch a blob by its Codex CID into a temp file (local=false → pull from the network if
+// we don't already hold it). Completion arrives on storageDownloadDone.
+void PerunAnalyticsBackend::storageGet(const QString &cid) {
+  const QString tmp = blobStoreDir() + QStringLiteral("/dl-") + cid;
+  modules().storage_module.downloadToUrl(cid, tmp, /*local=*/false, 65536);
+}

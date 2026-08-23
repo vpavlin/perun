@@ -9,6 +9,13 @@
     loam_core.url = "github:vpavlin/loam-basecamp?dir=core";
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.6";
     loam_core.inputs.logos-module-builder.follows = "logos-module-builder";
+
+    # SPIKE (branch spike/logos-storage): depend on the real Logos Storage (Codex)
+    # module. ABI ALIGNMENT TO VERIFY: storage_module builds against logos-cpp-sdk
+    # (feat/logos-result), while Perun pins logos-module-builder/0.2.6. If the generated
+    # modules().storage_module proxy is ABI-incompatible, align the pins here (e.g. make
+    # a shared logos-cpp-sdk/logos-module-builder `follows`). See docs/spikes/.
+    storage_module.url = "github:logos-co/logos-storage-module";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
