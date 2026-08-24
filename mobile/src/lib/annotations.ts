@@ -14,11 +14,11 @@
 import { useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
-import { GeoPoint } from "./types";
-import { sendAnnotation } from "./runSync";
-import { ensureNode, onMessage, getDeviceId, deliveryAvailable } from "./delivery";
+import { GeoPoint, Run } from "./types";
+import { sendAnnotation, syncRun } from "./runSync";
+import { ensureNode, onMessage, getDeviceId, deliveryAvailable, currentFingerprint } from "./delivery";
 import { loadIdentity } from "./identityStore";
-import { replicatePending } from "./blob";
+import { replicatePending, replicateBlob } from "./blob";
 
 export type AnnotationKind = "text" | "photo" | "voice" | "delete" | "edit";
 
@@ -250,6 +250,62 @@ export async function resendUnsynced(): Promise<void> {
     }
     if (changed) await writeRaw(runId, list);
   }
+}
+
+/**
+ * Full, NARRATED sync of one run: the GPX route, then every journey annotation
+ * (idempotent re-send — the receiver dedups by id), then a sealed copy of each
+ * photo/voice blob to the media server. Reports detailed progress through onStatus
+ * so sync is never an opaque "synced" again — including the household FINGERPRINT
+ * (a key mismatch is the classic silent failure) and per-item counts + errors.
+ */
+export async function syncRunFull(run: Run, onStatus?: (s: string) => void): Promise<void> {
+  // 1. Route (brings the node up; reports "Route: sending N chunks…").
+  await syncRun(run, onStatus);
+  const fp = currentFingerprint();
+  if (fp) onStatus?.(`Paired as “${fp}” — sending annotations…`);
+
+  // 2. Annotations: send EVERY event for this run (text/photo/voice/edit/delete),
+  //    idempotent by id, and mark them synced. Collect the media blobs to push.
+  const list = await readRaw(run.id);
+  const blobs = new Map<string, string>(); // blobId -> mime (dedup)
+  let notes = 0, notesFail = 0;
+  for (const a of list) {
+    if (a.blobId && a.mime) blobs.set(a.blobId, a.mime);
+    try {
+      await sendAnnotation(toWire(a));
+      a.synced = true;
+      notes++;
+      onStatus?.(`Annotations: ${notes}/${list.length} sent…`);
+    } catch {
+      notesFail++; // node hiccup — leave unsynced, resendUnsynced retries later
+    }
+  }
+  if (list.length) await writeRaw(run.id, list);
+
+  // 3. Media: push a sealed copy of each referenced blob to the server.
+  let media = 0, mediaFail = 0;
+  if (blobs.size) {
+    let i = 0;
+    for (const [cid, mime] of blobs) {
+      i++;
+      onStatus?.(`Media: uploading ${i}/${blobs.size}…`);
+      try {
+        (await replicateBlob(cid, mime)) ? media++ : mediaFail++;
+      } catch {
+        mediaFail++;
+      }
+    }
+  }
+
+  // 4. One honest summary line.
+  const parts = [
+    "run",
+    `${notes} note${notes === 1 ? "" : "s"}${notesFail ? ` (${notesFail} failed)` : ""}`,
+  ];
+  if (blobs.size) parts.push(`${media} media${mediaFail ? ` (${mediaFail} failed)` : ""}`);
+  const bad = notesFail + mediaFail;
+  onStatus?.(`${bad ? "Synced with issues" : "Synced ✓"} — ${parts.join(" · ")}${fp ? ` · ${fp}` : ""}`);
 }
 
 /**

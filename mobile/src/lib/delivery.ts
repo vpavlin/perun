@@ -29,6 +29,16 @@ export function deliveryAvailable(): boolean {
   return transport.deliveryAvailable();
 }
 
+/**
+ * The 3-word pairing fingerprint of the household this phone currently seals with
+ * (null if unpaired). Surfaced during sync so a household-KEY MISMATCH — phone and
+ * desktop on different secrets, the classic silent "connected but no sync" — is
+ * visible at a glance instead of guessed from matching-looking words.
+ */
+export function currentFingerprint(): string | null {
+  return route ? route.id.fingerprint.join(" ") : null;
+}
+
 // The single pair route: the phone↔Basecamp pairing identity + its derived topic.
 // An unpaired phone has no route and MUST NOT publish — never a public plaintext topic.
 let route: { id: Identity; topic: string } | null = null;

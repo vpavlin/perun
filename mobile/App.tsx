@@ -14,7 +14,7 @@ import { loadRuns, saveRun, deleteRun } from "./src/lib/store";
 import { loadIdentity } from "./src/lib/identityStore";
 import { exportRun } from "./src/lib/gpxExport";
 import { shareViewImage } from "./src/lib/imageExport";
-import { syncRun } from "./src/lib/runSync";
+import { syncRunFull } from "./src/lib/annotations";
 import { deliveryAvailable } from "./src/lib/delivery";
 import { startAnnotationReceive, useAnnotations } from "./src/lib/annotations";
 import { RunAnnotations } from "./src/components/Annotations";
@@ -517,8 +517,8 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
     if (!paired) { onNeedPairing(); return; } // no unpaired plaintext publishing
     setSync("Starting node…");
     try {
-      await syncRun(run, setSync);
-      setTimeout(() => setSync(null), 4000);
+      await syncRunFull(run, setSync);
+      setTimeout(() => setSync(null), 9000); // leave the summary up long enough to read
     } catch (e) {
       setSync(null);
       Alert.alert("Sync failed", e instanceof Error ? e.message : String(e));

@@ -49,11 +49,11 @@ export async function syncRun(run: Run, onStatus?: SyncProgress): Promise<void> 
       total,
       gz: fromByteArray(part),
     };
-    onStatus?.(total > 1 ? `Sending chunk ${seq + 1}/${total}…` : "Sending…");
+    onStatus?.(total > 1 ? `Route: sending ${seq + 1}/${total} chunks…` : "Route: sending…");
     await sendEnvelope(env);
   }
 
-  onStatus?.("Synced ✓");
+  onStatus?.(`Route: sent (${total} chunk${total > 1 ? "s" : ""})`);
 }
 
 /**
