@@ -150,6 +150,7 @@ export function ReplayMode({ run, visible, onClose }: { run: Run; visible: boole
               <QuickAnnotate
                 runId={run.id}
                 point={head}
+                track={points}
                 title="PIN AT THIS SPOT"
                 emptyHint="Scrub to a spot on the route to pin a note here."
               />

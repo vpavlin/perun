@@ -13,16 +13,18 @@ import { useCapture } from "../lib/useCapture";
 import { theme } from "../theme";
 
 export function QuickAnnotate({
-  runId, point, title = "ANNOTATE HERE", emptyHint = "Waiting for the first GPS fix…",
+  runId, point, track = [], title = "ANNOTATE HERE", emptyHint = "Waiting for the first GPS fix…",
 }: {
   runId: string;
   /** Where a new annotation is pinned — the live fix while recording, or the Replay
    *  playhead. Null disables capture (nothing to pin to yet). */
   point: GeoPoint | null;
+  /** The run's track, so a photo's EXIF geodata can place its pin. */
+  track?: GeoPoint[];
   title?: string;
   emptyHint?: string;
 }) {
-  const cap = useCapture(runId);
+  const cap = useCapture(runId, track);
   const count = useAnnotations(runId).length;
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");

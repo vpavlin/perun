@@ -44,8 +44,9 @@ export function RunAnnotations({ run }: { run: { id: string; track: { points: Ge
 
   useEffect(() => { getDeviceId().then(setDeviceId).catch(() => {}); }, []);
 
-  // All capture (text/photo/voice) goes through the shared, local-first hook.
-  const cap = useCapture(run.id);
+  // All capture (text/photo/voice) goes through the shared, local-first hook. The track
+  // lets a photo's EXIF geodata place its pin where it was actually taken.
+  const cap = useCapture(run.id, points);
   const busy = cap.busy;
   const recording = cap.recording;
 

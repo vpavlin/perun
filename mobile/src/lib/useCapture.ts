@@ -13,6 +13,7 @@ import {
 import { GeoPoint } from "./types";
 import { authorAnnotation } from "./annotations";
 import { readFileBytes, saveLocalBlob, replicateBlob } from "./blob";
+import { photoPointFromExif } from "./exif";
 
 export interface Capture {
   /** Non-null while a capture is in flight — a short status string to show. */
@@ -31,7 +32,8 @@ export interface Capture {
   cancelVoice: () => Promise<void>;
 }
 
-export function useCapture(runId: string): Capture {
+/** `track` (optional) is the run's points, used to place a photo from its EXIF geodata. */
+export function useCapture(runId: string, track: GeoPoint[] = []): Capture {
   const [busy, setBusy] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -62,16 +64,19 @@ export function useCapture(runId: string): Capture {
         return;
       }
       const res = fromCamera
-        ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.7 })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7 });
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.7, exif: true })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7, exif: true });
       if (res.canceled || !res.assets?.[0]) return;
       const asset = res.assets[0];
       const mime = asset.mimeType || "image/jpeg";
+      // If the photo carries its own location/time (EXIF), pin it where it was actually
+      // taken; otherwise use the point the caller gave (playhead / live fix / picked spot).
+      const pin = photoPointFromExif(asset.exif as Record<string, unknown> | undefined, track) ?? point;
       setBusy("Saving photo…");
       const bytes = await readFileBytes(asset.uri);
       const blobId = await saveLocalBlob(bytes, mime); // on-device, no server needed
       await authorAnnotation({
-        runId, point, kind: "photo", blobId, mime, text: caption?.trim() || undefined,
+        runId, point: pin, kind: "photo", blobId, mime, text: caption?.trim() || undefined,
       });
       void replicateBlob(blobId, mime); // best-effort background push to the server
     } catch (e) {
