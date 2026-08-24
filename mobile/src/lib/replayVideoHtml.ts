@@ -155,6 +155,15 @@ export function replayVideoHtml(): string {
     if(started) c.lineTo(hp[0],hp[1]); else { c.moveTo(seg[0][0],seg[0][1]); }
     c.stroke(); c.restore();
     c.fillStyle=C.ok; c.beginPath(); c.arc(seg[0][0],seg[0][1],U*0.009,0,7); c.fill();
+    // Annotation markers on the route (like the overview map) — colour by kind, the one
+    // you're passing is enlarged + glows.
+    for(i=0;i<m.annD.length;i++){ var an=m.annD[i], mp=m.proj(at(m,an.dist));
+      var col=an.kind==="photo"?C.photo:an.kind==="voice"?C.voice:C.prim;
+      var near2=Math.abs(an.dist-d)<=Math.max(60,m.total*0.03), r2=U*(near2?0.014:0.0085);
+      c.save(); c.shadowColor=col; c.shadowBlur=U*(near2?0.025:0.01);
+      c.fillStyle=col; c.beginPath(); c.arc(mp[0],mp[1],r2,0,7); c.fill();
+      c.lineWidth=U*0.0035; c.strokeStyle=C.bg; c.beginPath(); c.arc(mp[0],mp[1],r2,0,7); c.stroke();
+      c.restore(); }
     c.save(); c.shadowColor=C.prim2; c.shadowBlur=U*0.035;
     c.fillStyle="rgba(224,147,47,0.28)"; c.beginPath(); c.arc(hp[0],hp[1],U*0.022,0,7); c.fill();
     c.fillStyle=C.prim2; c.beginPath(); c.arc(hp[0],hp[1],U*0.011,0,7); c.fill(); c.restore();

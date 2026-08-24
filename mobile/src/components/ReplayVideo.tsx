@@ -7,7 +7,7 @@
 // write the returned WebM to a file and open the share sheet.
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Alert, Dimensions, Modal, PanResponder, Pressable, StyleSheet, Text, View,
+  Alert, Dimensions, Modal, PanResponder, Pressable, StatusBar, StyleSheet, Text, View,
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { File, Paths } from "expo-file-system";
@@ -112,6 +112,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   const [paceLive, setPaceLive] = useState(1); // live while dragging (display only)
   const [est, setEst] = useState(0);           // accurate estimate from the renderer
   const [basemap, setBasemap] = useState<string>("none");
+  const [sizeMb, setSizeMb] = useState(0);
 
   // Rebuild the payload + re-prep whenever the sheet opens, the ratio, or committed pace
   // changes. Clearing payloadRef ensures the WebView (which remounts) injects the fresh one.
@@ -132,6 +133,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     setPhase("saving");
     try {
       const bytes = toByteArray(b64);
+      setSizeMb(+(bytes.length / 1048576).toFixed(1));
       const safe = run.name.replace(/[^a-z0-9]+/gi, "-").slice(0, 40) || "run";
       const file = new File(Paths.cache, `perun-${safe}.webm`);
       try { if (file.exists) file.delete(); } catch { /* ignore */ }
@@ -212,7 +214,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     : phase === "ready" ? `Ready · ~${Math.round(est)}s`
     : phase === "rendering" ? `Rendering… ${Math.round(progress * 100)}%`
     : phase === "saving" ? "Saving + sharing…"
-    : phase === "done" ? "Shared ✓ — adjust and render again"
+    : phase === "done" ? `Shared ✓ · ${sizeMb} MB WebM`
     : phase === "unsupported" ? "This device's WebView can't record video"
     : phase === "error" ? `Failed: ${err}`
     : "";
@@ -358,7 +360,7 @@ function PaceSlider({ value, onLive, onCommit, disabled }: {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.bg, paddingTop: 8 },
+  root: { flex: 1, backgroundColor: theme.bg, paddingTop: (StatusBar.currentHeight ?? 0) + 8 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10 },
   title: { color: theme.text, fontSize: 18, fontWeight: "700", flexShrink: 1, paddingRight: 12 },
   close: { color: theme.primary, fontSize: 16, fontWeight: "600" },
