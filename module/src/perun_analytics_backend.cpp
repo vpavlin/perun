@@ -352,12 +352,16 @@ void PerunAnalyticsBackend::bootstrap() {
   // peers — the same canonical cfg kym/qaku use). useChannels/hubMode are loam-only flags
   // loam_core strips before forwarding the rest to the delivery node verbatim: perun
   // always rides SDS Reliable Channels; hubMode stays false (perun is never a headless hub).
+  // Ports are 0 = OS-assigned (ephemeral). Fixed ports (tcp 30303 / discv5 9000) collide
+  // with a leftover node from a crashed restart, or another loam_core app on this host —
+  // "Address already in use" on START_NODE. A desktop client dials the fleet outbound, so
+  // an ephemeral port is fine; the key must still be PRESENT so discv5 starts.
   const QJsonObject cfg{
       {"mode", "Core"},
       {"preset", "logos.test"},
       {"messagingOverrides", QJsonObject{{"logLevel", "INFO"},
-                                         {"tcp-port", 30303},
-                                         {"discv5-udp-port", 9000}}},
+                                         {"tcp-port", 0},
+                                         {"discv5-udp-port", 0}}},
       {"useChannels", true},
       {"hubMode", qEnvironmentVariableIsSet("PERUN_HUB")}};
   const QString cfgJson =
