@@ -1,24 +1,33 @@
 #!/usr/bin/env bash
-# Build the portable perun_analytics LGX and refresh the stable path that the
-# laptop scp's:  /home/vpavlin/perun/dist/perun_analytics.lgx
-# Run after every fix/feature.
+# Build the portable perun_core + perun_analytics LGX bundles (ADR 0006: the desktop
+# side is now a headless CORE + a thin VIEW). The view builds against the local core
+# via --override-input, so build the core FIRST.
+#   perun/dist/perun_core.lgx       <- headless engine/sync/hub
+#   perun/dist/perun_analytics.lgx  <- the ui_qml view over it
+# Run after every fix/feature. Publishes to the LAN repo too (:8443) via gen-lan-repo.sh.
 set -euo pipefail
-cd "$(dirname "$0")/../module"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source /etc/profile.d/nix-daemon.sh 2>/dev/null || true
-nix build .#lgx-portable -o /tmp/perun-lgx-out --print-out-paths >/dev/null
-mkdir -p /home/vpavlin/perun/dist
-install -m644 /tmp/perun-lgx-out/*.lgx /home/vpavlin/perun/dist/perun_analytics.lgx
-# Publish to the LAN server too. This used to be a manual copy, which silently
-# drifted: dist/ had the new build while the laptop kept downloading yesterday's.
-if [ -d /home/vpavlin/perun/dist/lan ]; then
-  install -m644 /home/vpavlin/perun/dist/perun_analytics.lgx \
-    /home/vpavlin/perun/dist/lan/perun_analytics.lgx
-  # Regenerate the repo index in the same breath. The index carries the .lgx's
-  # size + sha256, so a new build with a stale index means Basecamp downloads
-  # bytes that don't match the hash and refuses to install — silently blaming
-  # the file rather than the index.
-  bash /home/vpavlin/perun/scripts/gen-lan-repo.sh
+mkdir -p "$ROOT/dist"
+
+echo "== building perun_core (headless) =="
+( cd "$ROOT/core" && nix build .#lgx-portable -o /tmp/perun-core-out --print-out-paths >/dev/null )
+install -m644 /tmp/perun-core-out/*.lgx "$ROOT/dist/perun_core.lgx"
+
+echo "== building perun_analytics (view; override core -> ../core) =="
+( cd "$ROOT/module" && nix build .#lgx-portable -o /tmp/perun-view-out \
+    --override-input perun_core "path:$ROOT/core" --print-out-paths >/dev/null )
+install -m644 /tmp/perun-view-out/*.lgx "$ROOT/dist/perun_analytics.lgx"
+
+# Publish both to the LAN server (:8443). gen-lan-repo.sh scans dist/lan and rebuilds
+# the signed index (size+sha256 must match the .lgx or Basecamp refuses to install).
+if [ -d "$ROOT/dist/lan" ]; then
+  install -m644 "$ROOT/dist/perun_core.lgx"      "$ROOT/dist/lan/perun_core.lgx"
+  install -m644 "$ROOT/dist/perun_analytics.lgx" "$ROOT/dist/lan/perun_analytics.lgx"
+  bash "$ROOT/scripts/gen-lan-repo.sh"
 fi
-echo "updated: /home/vpavlin/perun/dist/perun_analytics.lgx"
-ls -l /home/vpavlin/perun/dist/perun_analytics.lgx
-sha256sum /home/vpavlin/perun/dist/perun_analytics.lgx
+
+echo "updated:"
+for f in perun_core perun_analytics; do
+  ls -l "$ROOT/dist/$f.lgx"; sha256sum "$ROOT/dist/$f.lgx"
+done
