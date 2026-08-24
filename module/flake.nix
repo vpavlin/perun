@@ -1,14 +1,14 @@
 {
-  description = "Perun Analytics — Logos Basecamp ui_qml module (C++ backend + QML view)";
+  description = "Perun Analytics — Logos Basecamp ui_qml VIEW over perun_core (ADR 0006).";
 
   inputs = {
-    # perun now depends on the loam_core FACADE (not delivery_module directly): it moves
-    # sealed CHUNKs through loam_core, which owns the delivery node (+ future ble_mesh) and
-    # SDS Reliable Channels. One module-builder across all of them (loam_core's delivery
-    # follows it too) = one SDK ABI. Same pins kym_core/qaku_core use (ADR 0015).
-    loam_core.url = "github:vpavlin/loam-basecamp?dir=core";
+    # The view is a thin proxy over the headless perun_core: it declares perun_core
+    # as its dependency so the builder generates the modules().perun_core proxy the
+    # backend calls. Build locally with --override-input perun_core path:../core
+    # (perun_core follows the same module-builder pin so the SDK ABI matches).
+    perun_core.url = "github:vpavlin/perun?dir=core";
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.6";
-    loam_core.inputs.logos-module-builder.follows = "logos-module-builder";
+    perun_core.inputs.logos-module-builder.follows = "logos-module-builder";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:

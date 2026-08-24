@@ -360,11 +360,11 @@
       },
       "locked": {
         "dir": "core",
-        "lastModified": 1787228394,
-        "narHash": "sha256-OA5bXkF4/wxHAfBCVdZnRHOkbUnsNWGzLXiicB7khPM=",
+        "lastModified": 1787563021,
+        "narHash": "sha256-F3v/52qZpWJRLBkNMFeTXvGMAPYg099bBksg2qKcmdk=",
         "owner": "vpavlin",
         "repo": "loam-basecamp",
-        "rev": "2c8d02888544f5832e910f3dec7b366c9c1e8e01",
+        "rev": "69c52564dcf54b330292469bf6044a26e1d52946",
         "type": "github"
       },
       "original": {

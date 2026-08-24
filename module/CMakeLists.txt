@@ -12,42 +12,23 @@ file(READ "${CMAKE_CURRENT_SOURCE_DIR}/metadata.json" METADATA_JSON)
 string(JSON MODULE_NAME GET ${METADATA_JSON} name)
 
 # Qt Network for the OSM raster tile fetcher (PerunAnalyticsBackend::ensureTile).
-# libQt6Network ships inside the qtbase already in the closure, so this adds no
-# new nix input — logos_module() only links Qt::Core + Qt::RemoteObjects, so we
-# resolve the Network imported target here and pass it via LINK_LIBRARIES below.
+# libQt6Network ships inside qtbase already in the closure.
 find_package(Qt6 REQUIRED COMPONENTS Network)
 
-# Universal UI module: you write the .rep + the *Backend class. REP_FILE runs
-# repc; the generated *Plugin glue in generated_code/ is compiled automatically.
+# Thin ui_qml VIEW (ADR 0006): the .rep + the *Backend proxy. All engine/sync
+# logic lives in perun_core; this module only mirrors its snapshot into the PROPs
+# and owns the sandbox-coupled tiles / QR / media caching. So the only sources are
+# the backend + the vendored QR encoder — no crypto/store/gpx here.
 logos_module(
     NAME ${MODULE_NAME}
     REP_FILE src/perun_analytics.rep
     SOURCES
         src/perun_analytics_backend.h
         src/perun_analytics_backend.cpp
-        src/blob_server.h
-        src/blob_server.cpp
-        src/perun_identity.h
-        src/perun_identity.cpp
-        src/pgp_words.h
         src/qrcodegen.hpp
         src/qrcodegen.cpp
-        src/run_store.h
-        src/run_store.cpp
-        src/geo.h
-        src/gpx.h
-        src/gzip.h
-        src/run_analytics.h
     INCLUDE_DIRS
         src
-        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/sqlite
-    EXTERNAL_LIBS
-        sqlite3
-    FIND_PACKAGES
-        ZLIB
-        OpenSSL
     LINK_LIBRARIES
-        ZLIB::ZLIB
         Qt6::Network
-        OpenSSL::Crypto
 )

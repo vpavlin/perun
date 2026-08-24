@@ -1,0 +1,36 @@
+{
+  "name": "perun_core",
+  "display_name": "Perun Core",
+  "version": "0.8.0",
+  "type": "core",
+  "interface": "universal",
+  "category": "fitness",
+  "description": "Perun engine + sync core: pairing/identity, the loam_core Delivery transport, the run + annotation event-log fold, the SQLite store and the embedded content-addressed media hub. Runs headless (the always-on hub) and behind the perun_analytics view.",
+  "main": "perun_core_plugin",
+  "dependencies": [
+    "loam_core"
+  ],
+  "nix": {
+    "packages": {
+      "build": [
+        "zlib",
+        "openssl"
+      ],
+      "runtime": [
+        "openssl"
+      ]
+    },
+    "external_libraries": [
+      {
+        "name": "sqlite3",
+        "vendor_path": "vendor/sqlite"
+      }
+    ],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  }
+}
