@@ -12,6 +12,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QLatin1String>
+#include <QCryptographicHash>
 #include <QNetworkAccessManager>
 
 #include "blob_server.h"
@@ -247,6 +248,7 @@ void PerunAnalyticsBackend::loadAnnotations() {
 // wins. Payload is nonce(12) + ChaCha20-Poly1305(env, aad=topic); a bad tag =
 // not ours / tampered / wrong candidate -> skip.
 void PerunAnalyticsBackend::ingestSealed(const QByteArray &raw) {
+  logEvent("rx ingest raw=" + std::to_string(raw.size()) + "B");
   const QByteArray d1 = QByteArray::fromBase64(raw);
   const QByteArray d2 = QByteArray::fromBase64(d1);
   for (const QByteArray &cand : {raw, d1, d2}) {
@@ -263,6 +265,7 @@ void PerunAnalyticsBackend::ingestSealed(const QByteArray &raw) {
       return;
     const QJsonObject env = doc.object();
     const QString etype = env.value(QStringLiteral("type")).toString();
+    logEvent("rx opened type=" + etype.toStdString());
 
     // ANNOTATION: photo / voice / text / delete pinned to a journey point,
     // authored on mobile and synced as its own sealed envelope alongside CHUNKs.
@@ -302,6 +305,9 @@ void PerunAnalyticsBackend::ingestSealed(const QByteArray &raw) {
     ingestGzTrack(id, rev, gz);
     return;
   }
+  // Reached only if NO candidate authenticated: not ours / wrong key / encoding mismatch.
+  logEvent("rx UNOPENED raw=" + std::to_string(raw.size()) +
+           "B (no candidate authenticated — wrong key/topic or base64 depth)");
 }
 
 void PerunAnalyticsBackend::bootstrap() {
@@ -314,6 +320,7 @@ void PerunAnalyticsBackend::bootstrap() {
   // receive paths (raw relay + SDS channel) collapse into this one `received` event;
   // its payloadB64 is a string, so data.at(2).toByteArray() yields the base64 text.
   auto onSealed = [this](const QVariantList &data) {
+    logEvent("rx frame from loam_core: " + std::to_string(data.size()) + " fields");
     if (data.size() >= 3)
       ingestSealed(data.at(2).toByteArray());
   };
@@ -335,7 +342,17 @@ void PerunAnalyticsBackend::bootstrap() {
       // Never surface the derived topic (secret-adjacent) — the fingerprint PROP is
       // the user-facing pairing identity.
       setStatus(QStringLiteral("Connected · paired"));
-      logEvent("node ready on derived topic");
+      logEvent("node ready; joined topic hash=" +
+               QString::fromLatin1(QCryptographicHash::hash(m_topic.toUtf8(),
+                   QCryptographicHash::Sha256).toHex().left(10)).toStdString());
+      // Diagnostic: log peers/mesh/shard every 15s so a "connected but no sync" can be
+      // localized (fleet meshed? same shard as the phone?). Cheap; safe to keep.
+      QTimer *mt = new QTimer(this);
+      connect(mt, &QTimer::timeout, this, [this]() {
+        const QString mj = modules().loam_core.metricsJson();
+        logEvent("metrics: " + mj.left(600).toStdString());
+      });
+      mt->start(15000);
       if (qEnvironmentVariableIsSet("PERUN_TEST_AUTOPUBLISH")) {
         logEvent("PERUN_TEST_AUTOPUBLISH set — publishing a sample run in 12s");
         QTimer::singleShot(12000, [this]() { publishSampleRun(); });
