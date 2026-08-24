@@ -23,14 +23,15 @@ const MAX_PHOTOS = 6; // bound the embedded payload + canvas work
 
 type Phase = "prep" | "rendering" | "saving" | "done" | "error" | "unsupported";
 
-/** Read a locally-held photo blob and return a data: URI, or null if we don't have it. */
-async function photoDataUri(a: Annotation): Promise<string | null> {
-  if (a.kind !== "photo" || !a.blobId) return null;
-  const uri = localBlobUri(a.blobId, a.mime || "image/jpeg");
+/** Read a locally-held blob and return a data: URI, or null if we don't have it. */
+async function blobDataUri(a: Annotation, fallbackMime: string): Promise<string | null> {
+  if (!a.blobId) return null;
+  const mime = a.mime || fallbackMime;
+  const uri = localBlobUri(a.blobId, mime);
   if (!uri) return null; // only embed what's on THIS device (offline)
   try {
     const bytes = await readFileBytes(uri);
-    return `data:${a.mime || "image/jpeg"};base64,${fromByteArray(bytes)}`;
+    return `data:${mime};base64,${fromByteArray(bytes)}`;
   } catch {
     return null;
   }
@@ -43,18 +44,25 @@ async function buildPayload(run: Run, annotations: Annotation[]) {
   const anns = [];
   for (const a of annotations) {
     if (a.kind !== "text" && a.kind !== "photo" && a.kind !== "voice") continue;
-    let img: string | null = null;
+    let img: string | undefined;
+    let audio: string | undefined;
     if (a.kind === "photo" && photos < MAX_PHOTOS) {
-      img = await photoDataUri(a);
-      if (img) photos++;
+      const u = await blobDataUri(a, "image/jpeg");
+      if (u) { img = u; photos++; }
     }
-    anns.push({ t: a.t, kind: a.kind, text: a.text || "", img: img || undefined });
+    if (a.kind === "voice") {
+      const u = await blobDataUri(a, "audio/m4a"); // played into the video at its dwell
+      if (u) audio = u;
+    }
+    anns.push({ t: a.t, kind: a.kind, text: a.text || "", dur: a.dur, img, audio });
   }
   return {
     name: run.name,
     points,
     annotations: anns,
-    opts: { durationS: 12, size: 900, bitrate: 4_000_000 },
+    // The clip pauses (dwells) at each annotation so it's readable; a voice dwell stretches
+    // to the note's length. travel = glide time across the whole route.
+    opts: { travelS: 9, dwellS: 3, dwellCap: 16, size: 900, bitrate: 4_000_000 },
   };
 }
 
