@@ -298,7 +298,11 @@ export function replayVideoHtml(): string {
       fr.onloadend=function(){
         // Send the base64 in chunks — one giant postMessage gets truncated by the RN
         // bridge (→ a corrupt, unplayable file). RN reassembles by index.
-        var url=String(fr.result); var b64=url.slice(url.indexOf(",")+1);
+        // Split at ";base64," NOT the first comma: with audio the mime is
+        // "video/webm;codecs=vp8,opus", so the first comma is INSIDE the codecs (that bug
+        // produced a real-size but corrupt, unplayable file).
+        var url=String(fr.result); var sep=url.indexOf(";base64,");
+        var b64=sep>=0?url.slice(sep+8):url.slice(url.indexOf(",")+1);
         var CH=524288, total=Math.ceil(b64.length/CH), i;
         post({type:"vstart",total:total,len:b64.length,bytes:blob.size});
         for(i=0;i<total;i++){ post({type:"vchunk",i:i,data:b64.slice(i*CH,(i+1)*CH)}); }
