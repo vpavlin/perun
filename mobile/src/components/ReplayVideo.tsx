@@ -7,10 +7,10 @@
 // write the returned WebM to a file and open the share sheet.
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Alert, Dimensions, Modal, PanResponder, Pressable, StatusBar, StyleSheet, Text, View,
+  Alert, Dimensions, Modal, PanResponder, Pressable, ScrollView, StatusBar, StyleSheet, Text, View,
 } from "react-native";
 import { WebView } from "react-native-webview";
-import { File, Paths } from "expo-file-system";
+import { File, Directory, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { fromByteArray, toByteArray } from "base64-js";
 import { Run } from "../lib/types";
@@ -20,6 +20,28 @@ import { replayVideoHtml } from "../lib/replayVideoHtml";
 import { theme } from "../theme";
 
 const MAX_PHOTOS = 6; // bound the embedded payload + canvas work
+
+/** Persistent store for rendered clips (survives, re-shareable) — filename encodes the run,
+ *  ratio and a timestamp, so nothing is overwritten. */
+function videosDir(): Directory {
+  const d = new Directory(Paths.document, "perun-videos");
+  try { if (!d.exists) d.create({ intermediates: true }); } catch { /* ignore */ }
+  return d;
+}
+interface Saved { name: string; uri: string; size: number; ratio: string }
+function listSaved(runSafe: string): Saved[] {
+  try {
+    return videosDir().list()
+      .filter((e): e is File => e instanceof File && e.name.startsWith(`perun__${runSafe}__`))
+      .map((f) => ({
+        name: f.name, uri: f.uri, size: (f as { size?: number }).size ?? 0,
+        ratio: f.name.replace(/\.webm$/, "").split("__")[2] || "",
+      }))
+      .sort((a, b) => (a.name < b.name ? 1 : -1)); // newest first (name embeds the ts)
+  } catch {
+    return [];
+  }
+}
 const BASE_TRAVEL = 12; // seconds of cruise across the whole route at pace 1.0
 const PACE = { min: 0.6, max: 2.4 }; // higher = faster = shorter clip
 
@@ -113,6 +135,10 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   const [est, setEst] = useState(0);           // accurate estimate from the renderer
   const [basemap, setBasemap] = useState<string>("none");
   const [sizeMb, setSizeMb] = useState(0);
+  const runSafe = run.name.replace(/[^a-z0-9]+/gi, "-").slice(0, 40) || "run";
+  const [saved, setSaved] = useState<Saved[]>([]);
+  const refreshSaved = () => setSaved(listSaved(runSafe));
+  useEffect(() => { if (visible) refreshSaved(); /* eslint-disable-next-line */ }, [visible]);
 
   // Rebuild the payload + re-prep whenever the sheet opens, the ratio, or committed pace
   // changes. Clearing payloadRef ensures the WebView (which remounts) injects the fresh one.
@@ -134,20 +160,30 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     try {
       const bytes = toByteArray(b64);
       setSizeMb(+(bytes.length / 1048576).toFixed(1));
-      const safe = run.name.replace(/[^a-z0-9]+/gi, "-").slice(0, 40) || "run";
-      const file = new File(Paths.cache, `perun-${safe}.webm`);
-      try { if (file.exists) file.delete(); } catch { /* ignore */ }
+      // Persist to the Perun videos dir (kept + re-shareable), a unique name per render.
+      const file = new File(videosDir(), `perun__${runSafe}__${ratioKey}__${Date.now()}.webm`);
       file.write(bytes);
-      if (!(await Sharing.isAvailableAsync())) {
-        Alert.alert("Saved", `Video saved to:\n${file.uri}`);
-      } else {
-        await Sharing.shareAsync(file.uri, { mimeType: "video/webm", dialogTitle: `${run.name} — Replay` });
-      }
+      refreshSaved();
       setPhase("done");
+      await shareSaved(file.uri);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
       setPhase("error");
     }
+  };
+
+  const shareSaved = async (uri: string) => {
+    if (!(await Sharing.isAvailableAsync())) { Alert.alert("Saved", `Video is stored at:\n${uri}`); return; }
+    await Sharing.shareAsync(uri, { mimeType: "video/webm", dialogTitle: `${run.name} — Replay` });
+  };
+  const deleteSaved = (v: Saved) => {
+    Alert.alert("Delete video?", `${(v.size / 1048576).toFixed(1)} MB clip`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => {
+        try { new File(videosDir(), v.name).delete(); } catch { /* ignore */ }
+        refreshSaved();
+      } },
+    ]);
   };
 
   const startRender = () => {
@@ -229,6 +265,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
           <Pressable onPress={onClose} hitSlop={12}><Text style={styles.close}>Done</Text></Pressable>
         </View>
 
+        <ScrollView contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
         {/* Aspect-ratio picker — each re-renders the clip at that frame. */}
         <View style={styles.ratios}>
           {Object.keys(RATIOS).map((k) => {
@@ -322,6 +359,26 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
             {basemap === "none" ? " Fully on-device, no network." : " Map tiles are fetched from the network."}
           </Text>
         )}
+
+        {/* Saved clips for this run — kept in the Perun videos folder; tap to re-share. */}
+        {saved.length > 0 && (
+          <View style={styles.savedWrap}>
+            <Text style={styles.savedLabel}>SAVED — tap to share, ✕ to delete</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.savedRow}>
+              {saved.map((v) => (
+                <View key={v.name} style={styles.savedChip}>
+                  <Pressable onPress={() => void shareSaved(v.uri)} hitSlop={4}>
+                    <Text style={styles.savedChipText}>▶ {RATIOS[v.ratio]?.label || v.ratio} · {(v.size / 1048576).toFixed(1)}MB</Text>
+                  </Pressable>
+                  <Pressable hitSlop={8} onPress={() => deleteSaved(v)}>
+                    <Text style={styles.savedDel}>✕</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -389,6 +446,12 @@ const styles = StyleSheet.create({
   btnCancel: { borderWidth: 1, borderColor: theme.error },
   btnCancelText: { color: theme.error, fontSize: 16, fontWeight: "700" },
   btnDisabled: { opacity: 0.45 },
+  savedWrap: { marginTop: 16, paddingHorizontal: 16 },
+  savedLabel: { color: theme.textTertiary, fontSize: 11, fontWeight: "700", letterSpacing: 0.5, marginBottom: 8 },
+  savedRow: { gap: 8, paddingRight: 16 },
+  savedChip: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
+  savedChipText: { color: theme.text, fontSize: 13, fontWeight: "600" },
+  savedDel: { color: theme.textTertiary, fontSize: 14 },
   stage: { backgroundColor: "#000", alignSelf: "center" },
   bar: { height: 4, backgroundColor: theme.card, marginHorizontal: 16, marginTop: 18, borderRadius: 2, overflow: "hidden" },
   barFill: { height: 4, backgroundColor: theme.primary },
