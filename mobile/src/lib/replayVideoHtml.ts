@@ -292,13 +292,15 @@ export function replayVideoHtml(): string {
     catch(e){ post({type:"error",msg:"recorder: "+e}); return; }
     var chunks=[], aborted=false; rec.ondataavailable=function(e){ if(e.data&&e.data.size) chunks.push(e.data); };
     rec.onstop=function(){ if(aborted){ post({type:"cancelled"}); return; }
-      var blob=new Blob(chunks,{type:mime}); var fr=new FileReader();
+      var blob=new Blob(chunks,{type:mime});
+      if(!blob.size){ post({type:"error",msg:"empty recording (the WebView produced no video)"}); return; }
+      var fr=new FileReader();
       fr.onloadend=function(){
         // Send the base64 in chunks — one giant postMessage gets truncated by the RN
         // bridge (→ a corrupt, unplayable file). RN reassembles by index.
         var url=String(fr.result); var b64=url.slice(url.indexOf(",")+1);
         var CH=524288, total=Math.ceil(b64.length/CH), i;
-        post({type:"vstart",total:total,len:b64.length});
+        post({type:"vstart",total:total,len:b64.length,bytes:blob.size});
         for(i=0;i<total;i++){ post({type:"vchunk",i:i,data:b64.slice(i*CH,(i+1)*CH)}); }
         post({type:"vend"});
       };
@@ -307,7 +309,9 @@ export function replayVideoHtml(): string {
     var INTRO=0.9, DRAW=sched.time, OUTRO=2.4, TOTAL=INTRO+DRAW+OUTRO;
     var t0=null, lastP=-1, played={};
     function post0(p){ p=Math.max(0,Math.min(1,p)); if(p-lastP>=0.02){lastP=p; post({type:"progress",p:p});} }
-    rec.start();
+    // Timeslice: some Android WebViews emit a single MALFORMED blob with a plain start();
+    // periodic chunks concatenate into a valid file.
+    rec.start(1000);
     function frame(now){
       if(window.__cancelled){ aborted=true; try{rec.stop();}catch(e){} return; }
       if(t0===null)t0=now; var el=(now-t0)/1000; post0(el/TOTAL);

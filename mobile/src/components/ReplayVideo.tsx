@@ -159,7 +159,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   };
 
   const onMessage = (raw: string) => {
-    let m: { type?: string; p?: number; i?: number; data?: string; total?: number; len?: number; msg?: string; durationS?: number };
+    let m: { type?: string; p?: number; i?: number; data?: string; total?: number; len?: number; bytes?: number; msg?: string; durationS?: number };
     try { m = JSON.parse(raw); } catch { return; }
     if (m.type === "ready") {
       // Hand the (already-built) payload to the renderer to PREP. Retry if not ready yet.
@@ -177,6 +177,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     } else if (m.type === "vstart") {
       vchunks.current = new Array(m.total || 0).fill(undefined);
       vlen.current = m.len || 0;
+      if (m.bytes) setSizeMb(+(m.bytes / 1048576).toFixed(2));
       setPhase("saving");
     } else if (m.type === "vchunk") {
       if (typeof m.i === "number" && typeof m.data === "string") vchunks.current[m.i] = m.data;
@@ -213,7 +214,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     phase === "prep" ? "Preparing…"
     : phase === "ready" ? `Ready · ~${Math.round(est)}s`
     : phase === "rendering" ? `Rendering… ${Math.round(progress * 100)}%`
-    : phase === "saving" ? "Saving + sharing…"
+    : phase === "saving" ? `Saving + sharing… (${sizeMb} MB)`
     : phase === "done" ? `Shared ✓ · ${sizeMb} MB WebM`
     : phase === "unsupported" ? "This device's WebView can't record video"
     : phase === "error" ? `Failed: ${err}`
