@@ -373,9 +373,22 @@ void PerunAnalyticsBackend::bootstrap() {
   // with a leftover node from a crashed restart, or another loam_core app on this host —
   // "Address already in use" on START_NODE. A desktop client dials the fleet outbound, so
   // an ephemeral port is fine; the key must still be PRESENT so discv5 starts.
+  // Explicit fleet entryNodes — preset-only discovery does NOT mesh the fleet on desktop
+  // (prints "Connected" but sits isolated at 0 real peers; the qaku-desktop-no-entrynodes
+  // bug — and the exact reason the crib hub pins these). loam_core forwards them to
+  // createNode verbatim. Same logos.test (cluster 2) nodes kym/qaku/scala use in the crib.
+  const QJsonArray entryNodes{
+      "/dns4/node-01.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmQ9X2xDfPG3uL77V9piYDhjq14JhKCtcmNYsTMKNqrKCj",
+      "/dns4/node-02.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmB8NYprrfQrgWVzsJtYWkfjsXbmJEGNMG6othXsQ53BwG",
+      "/dns4/node-01.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmF8WtwGPmeGHgYAX2277jHgy5cW9F7zsB8EqUjBZQAZQ3",
+      "/dns4/node-02.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmUuXhUW9bdJpzN1kfDziFiUZo4bszTk66cvr7uuyCHXR7",
+      "/dns4/node-01.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmL3oU95jh1BZHozn3uNhx8HEneirgr8M1jEAapzXGDqRF",
+      "/dns4/node-02.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAm28CoBZjpyxsanC8tQpbvZ7bZJnVYuB1EgFzb571qpWsV"};
   const QJsonObject cfg{
       {"mode", "Core"},
       {"preset", "logos.test"},
+      {"relay", true},
+      {"entryNodes", entryNodes},
       {"messagingOverrides", QJsonObject{{"logLevel", "INFO"},
                                          {"tcp-port", 0},
                                          {"discv5-udp-port", 0}}},
