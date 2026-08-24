@@ -7,7 +7,7 @@
 // write the returned WebM to a file and open the share sheet.
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Alert, Dimensions, Modal, Pressable, StyleSheet, Text, View,
+  Alert, Dimensions, Modal, PanResponder, Pressable, StyleSheet, Text, View,
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { File, Paths } from "expo-file-system";
@@ -20,8 +20,21 @@ import { replayVideoHtml } from "../lib/replayVideoHtml";
 import { theme } from "../theme";
 
 const MAX_PHOTOS = 6; // bound the embedded payload + canvas work
+const BASE_TRAVEL = 12; // seconds of cruise across the whole route at pace 1.0
+const PACE = { min: 0.6, max: 2.4 }; // higher = faster = shorter clip
 
-type Phase = "prep" | "rendering" | "saving" | "done" | "error" | "unsupported";
+// prep = building/prepping; ready = prepared, waiting for Start; then rendering → saving.
+type Phase = "prep" | "ready" | "rendering" | "saving" | "done" | "error" | "unsupported";
+
+/** Estimated clip length (s) for a pace — matches the renderer's schedule formula. */
+function estimateDuration(annotations: Annotation[], pace: number): number {
+  let read = 0;
+  for (const a of annotations) {
+    if (a.kind === "text" || a.kind === "photo") read += 3;
+    else if (a.kind === "voice") read += Math.max(3, (a.dur || 3) + 0.8);
+  }
+  return 0.9 + BASE_TRAVEL / pace + read + 2.4;
+}
 
 /** Read a locally-held blob and return a data: URI, or null if we don't have it. */
 async function blobDataUri(a: Annotation, fallbackMime: string): Promise<string | null> {
@@ -45,7 +58,7 @@ const RATIOS: Record<string, { w: number; h: number; label: string; hint: string
 };
 
 /** Build the JSON the WebView renderer consumes. */
-async function buildPayload(run: Run, annotations: Annotation[], dims: { w: number; h: number }) {
+async function buildPayload(run: Run, annotations: Annotation[], dims: { w: number; h: number }, pace: number) {
   const points = run.track.points.map((p) => ({ lat: p.lat, lon: p.lon, alt: p.alt ?? 0, t: p.t }));
   let photos = 0;
   const anns = [];
@@ -69,9 +82,10 @@ async function buildPayload(run: Run, annotations: Annotation[], dims: { w: numb
     name: run.name,
     points,
     annotations: anns,
-    // The clip pauses (dwells) at each annotation so it's readable; a voice dwell stretches
-    // to the note's length. travel = glide time across the whole route.
-    opts: { travelS: 9, dwellS: 3, dwellCap: 16, width: dims.w, height: dims.h, bitrate },
+    // travelS = cruise time across the whole route (pace scales it). The playhead
+    // decelerates into / crawls through / accelerates out of each annotation (readS, or a
+    // voice note's length) — a smooth slow-through, not a hard stop.
+    opts: { travelS: BASE_TRAVEL / pace, readS: 3, width: dims.w, height: dims.h, bitrate },
   };
 }
 
@@ -84,20 +98,24 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   const [err, setErr] = useState<string>("");
   const [ratioKey, setRatioKey] = useState<string>("square");
   const ratio = RATIOS[ratioKey];
+  const [pace, setPace] = useState(1);         // committed pace (triggers a re-prep)
+  const [paceLive, setPaceLive] = useState(1); // live while dragging (display only)
+  const [est, setEst] = useState(0);           // accurate estimate from the renderer
 
-  // Rebuild the payload whenever the sheet opens or the aspect ratio changes. Clearing
-  // payloadRef first ensures the WebView (which remounts per ratio) injects the fresh one.
+  // Rebuild the payload + re-prep whenever the sheet opens, the ratio, or committed pace
+  // changes. Clearing payloadRef ensures the WebView (which remounts) injects the fresh one.
   useEffect(() => {
     if (!visible) return;
     let alive = true;
     payloadRef.current = null;
     setPhase("prep"); setProgress(0); setErr("");
-    buildPayload(run, annotations, { w: ratio.w, h: ratio.h }).then((p) => {
+    setEst(estimateDuration(annotations, pace));
+    buildPayload(run, annotations, { w: ratio.w, h: ratio.h }, pace).then((p) => {
       if (alive) payloadRef.current = JSON.stringify(p);
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, run.id, ratioKey]);
+  }, [visible, run.id, ratioKey, pace]);
 
   const shareWebm = async (dataUrl: string) => {
     setPhase("saving");
@@ -120,22 +138,34 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     }
   };
 
+  const startRender = () => {
+    webRef.current?.injectJavaScript("window.__start&&window.__start();true;");
+    setProgress(0); setPhase("rendering");
+  };
+  const cancelRender = () => {
+    webRef.current?.injectJavaScript("window.__cancel&&window.__cancel();true;");
+  };
+
   const onMessage = (raw: string) => {
-    let m: { type?: string; p?: number; dataUrl?: string; msg?: string };
+    let m: { type?: string; p?: number; dataUrl?: string; msg?: string; durationS?: number };
     try { m = JSON.parse(raw); } catch { return; }
     if (m.type === "ready") {
-      // Hand the (already-built) payload to the renderer. Retry briefly if not ready yet.
+      // Hand the (already-built) payload to the renderer to PREP. Retry if not ready yet.
       const send = (n: number) => {
         const p = payloadRef.current;
         if (!p) { if (n > 0) setTimeout(() => send(n - 1), 150); return; }
         webRef.current?.injectJavaScript(`window.__setRun(${JSON.stringify(p)});true;`);
-        setPhase("rendering");
       };
-      send(20);
+      send(25);
+    } else if (m.type === "prepared") {
+      if (typeof m.durationS === "number") setEst(m.durationS);
+      setPhase("ready");
     } else if (m.type === "progress") {
       setProgress(typeof m.p === "number" ? m.p : 0);
     } else if (m.type === "done" && m.dataUrl) {
       void shareWebm(m.dataUrl);
+    } else if (m.type === "cancelled") {
+      setProgress(0); setPhase("ready");
     } else if (m.type === "error") {
       setErr(m.msg || "render failed");
       setPhase(/support/i.test(m.msg || "") ? "unsupported" : "error");
@@ -154,12 +184,14 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
 
   const label =
     phase === "prep" ? "Preparing…"
+    : phase === "ready" ? `Ready · ~${Math.round(est)}s`
     : phase === "rendering" ? `Rendering… ${Math.round(progress * 100)}%`
     : phase === "saving" ? "Saving + sharing…"
-    : phase === "done" ? "Shared ✓ — pick another ratio to make another"
+    : phase === "done" ? "Shared ✓ — adjust and render again"
     : phase === "unsupported" ? "This device's WebView can't record video"
     : phase === "error" ? `Failed: ${err}`
     : "";
+  const estShown = busy ? est : estimateDuration(annotations, paceLive);
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -192,7 +224,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
         <View style={[styles.stage, { width: sw, height: sh }]}>
           {visible && (
             <WebView
-              key={ratioKey}
+              key={`${ratioKey}-${pace.toFixed(2)}`}
               ref={webRef}
               source={{ html: replayVideoHtml() }}
               originWhitelist={["*"]}
@@ -206,15 +238,77 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
           )}
         </View>
 
+        {/* Pace / length — slide to control how long the clip is (live estimate). */}
+        <View style={styles.paceRow}>
+          <Text style={styles.paceCap}>Longer</Text>
+          <PaceSlider
+            value={paceLive}
+            disabled={busy}
+            onLive={setPaceLive}
+            onCommit={(v) => { setPaceLive(v); setPace(v); }}
+          />
+          <Text style={styles.paceCap}>Shorter</Text>
+          <Text style={styles.paceEst}>~{Math.round(estShown)}s</Text>
+        </View>
+
         <View style={styles.bar}>
           <View style={[styles.barFill, { width: `${Math.round(progress * 100)}%` }]} />
         </View>
         <Text style={styles.status}>{label}</Text>
-        {(phase === "rendering" || phase === "prep") && (
-          <Text style={styles.hint}>Keep the app in the foreground while it renders — it's all on-device, no network.</Text>
+
+        <View style={styles.controls}>
+          {phase === "rendering" ? (
+            <Pressable style={[styles.btn, styles.btnCancel]} onPress={cancelRender}>
+              <Text style={styles.btnCancelText}>Cancel</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              style={[styles.btn, styles.btnPrimary, (phase === "prep" || phase === "saving") && styles.btnDisabled]}
+              disabled={phase === "prep" || phase === "saving"}
+              onPress={startRender}
+            >
+              <Text style={styles.btnPrimaryText}>{phase === "done" ? "● Render again" : "● Start render"}</Text>
+            </Pressable>
+          )}
+        </View>
+        {(phase === "prep" || phase === "ready" || phase === "rendering") && (
+          <Text style={styles.hint}>Pick a frame + pace, then Start. Keep the app in the foreground while it renders — all on-device, no network.</Text>
         )}
       </View>
     </Modal>
+  );
+}
+
+/** A minimal pace slider (no native dep). Reports live value while dragging, commits on
+ *  release (which triggers a re-prep). Left = longer clip, right = shorter. */
+function PaceSlider({ value, onLive, onCommit, disabled }: {
+  value: number; onLive: (v: number) => void; onCommit: (v: number) => void; disabled?: boolean;
+}) {
+  const wRef = useRef(1);
+  const toVal = (x: number) => {
+    const t = Math.max(0, Math.min(1, x / Math.max(1, wRef.current)));
+    return PACE.min + t * (PACE.max - PACE.min);
+  };
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => !disabled,
+      onMoveShouldSetPanResponder: () => !disabled,
+      onPanResponderGrant: (e) => onLive(toVal(e.nativeEvent.locationX)),
+      onPanResponderMove: (e) => onLive(toVal(e.nativeEvent.locationX)),
+      onPanResponderRelease: (e) => onCommit(toVal(e.nativeEvent.locationX)),
+    })
+  ).current;
+  const t = (value - PACE.min) / (PACE.max - PACE.min);
+  return (
+    <View
+      style={[styles.sliderTrack, disabled && styles.ratioDisabled]}
+      onLayout={(e) => { wRef.current = e.nativeEvent.layout.width; }}
+      {...pan.panHandlers}
+    >
+      <View style={styles.sliderBase} />
+      <View style={[styles.sliderFill, { width: `${t * 100}%` }]} />
+      <View style={[styles.sliderThumb, { left: `${t * 100}%` }]} />
+    </View>
   );
 }
 
@@ -230,6 +324,20 @@ const styles = StyleSheet.create({
   ratioLabel: { color: theme.textSecondary, fontSize: 15, fontWeight: "700" },
   ratioLabelOn: { color: theme.primary },
   ratioHint: { color: theme.textTertiary, fontSize: 10, marginTop: 2 },
+  paceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, marginTop: 14 },
+  paceCap: { color: theme.textTertiary, fontSize: 11 },
+  paceEst: { color: theme.text, fontSize: 13, fontWeight: "700", minWidth: 42, textAlign: "right" },
+  sliderTrack: { flex: 1, height: 26, justifyContent: "center" },
+  sliderBase: { position: "absolute", left: 0, right: 0, top: 11, height: 4, borderRadius: 2, backgroundColor: theme.border },
+  sliderFill: { position: "absolute", left: 0, top: 11, height: 4, borderRadius: 2, backgroundColor: theme.primary },
+  sliderThumb: { position: "absolute", width: 18, height: 18, borderRadius: 9, marginLeft: -9, backgroundColor: theme.primary, borderWidth: 2, borderColor: theme.bg, top: 4 },
+  controls: { paddingHorizontal: 16, marginTop: 14 },
+  btn: { borderRadius: 13, paddingVertical: 15, alignItems: "center" },
+  btnPrimary: { backgroundColor: theme.primary },
+  btnPrimaryText: { color: "#1a1206", fontSize: 16, fontWeight: "800" },
+  btnCancel: { borderWidth: 1, borderColor: theme.error },
+  btnCancelText: { color: theme.error, fontSize: 16, fontWeight: "700" },
+  btnDisabled: { opacity: 0.45 },
   stage: { backgroundColor: "#000", alignSelf: "center" },
   bar: { height: 4, backgroundColor: theme.card, marginHorizontal: 16, marginTop: 18, borderRadius: 2, overflow: "hidden" },
   barFill: { height: 4, backgroundColor: theme.primary },

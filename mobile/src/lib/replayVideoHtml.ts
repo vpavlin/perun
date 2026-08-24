@@ -72,27 +72,34 @@ export function replayVideoHtml(): string {
     function L(x,y){return x+(y-x)*f;}
     return {lat:L(a.lat,b.lat),lon:L(a.lon,b.lon),alt:L(a.alt,b.alt),t:L(a.t,b.t)};}
 
-  // Distance-vs-time schedule: glide between annotations, then PAUSE (dwell) at each so
-  // its card is readable / its voice note can play. A voice dwell stretches to the clip's
-  // length. Draw time = travel + sum(dwells), so more annotations → a longer, calmer video.
+  // Smooth speed curve → time-vs-distance table. The playhead cruises between annotations
+  // and DECELERATES into / crawls through / ACCELERATES out of each (never stops), giving
+  // enough time to read/listen without the abrupt hard-stop. Each annotation is allotted a
+  // "read budget" (seconds) spread as extra time over a raised-cosine window around it
+  // (voice gets its full length). travelS = base cruise time for the whole route.
   function buildSchedule(m,opts){
-    var base=opts.travelS||9, dwell=opts.dwellS||3, cap=opts.dwellCap||16;
-    var anns=m.annD.slice().sort(function(a,b){return a.dist-b.dist;});
-    var phases=[], t=0, prev=0, i;
-    function travel(d0,d1){ var dur=base*(Math.abs(d1-d0)/Math.max(1,m.total)); if(dur<0.15)dur=0.15;
-      phases.push({t0:t,t1:t+dur,d0:d0,d1:d1,dwell:false}); t+=dur; }
-    for(i=0;i<anns.length;i++){ travel(prev,anns[i].dist);
-      var dw=dwell; if(anns[i].kind==="voice"&&anns[i].dur) dw=Math.min(cap,Math.max(dwell,anns[i].dur+0.8));
-      phases.push({t0:t,t1:t+dw,d0:anns[i].dist,d1:anns[i].dist,dwell:true,ann:anns[i]}); t+=dw; prev=anns[i].dist; }
-    travel(prev,m.total);
-    return {phases:phases,total:t};
+    var K=1200, total=m.total, step=total/K, k, j;
+    var travelS=opts.travelS||12, readS=opts.readS||3;
+    var infos=m.annD.map(function(a){
+      var R=(a.kind==="voice"&&a.dur)?Math.max(readS,a.dur+0.8):readS;
+      var HW=Math.min(total*0.20,Math.max(40,total*0.10));
+      return {d:a.dist,R:R,HW:HW,W:0};
+    });
+    for(j=0;j<infos.length;j++){ var inf=infos[j],sum=0;
+      for(k=0;k<K;k++){ var dd=Math.abs((k+0.5)*step-inf.d); if(dd<inf.HW) sum+=0.5*(1+Math.cos(Math.PI*dd/inf.HW)); }
+      inf.W=sum||1; }
+    var T=new Array(K+1); T[0]=0;
+    for(k=0;k<K;k++){ var dmid=(k+0.5)*step, extra=0;
+      for(j=0;j<infos.length;j++){ var f=infos[j],e=Math.abs(dmid-f.d);
+        if(e<f.HW) extra+=f.R*(0.5*(1+Math.cos(Math.PI*e/f.HW))/f.W); }
+      T[k+1]=T[k]+travelS/K+extra; }
+    return {T:T,K:K,step:step,dist:total,time:T[K]};
   }
-  function distAtTime(s,t){ var i,p;
-    for(i=0;i<s.phases.length;i++){ p=s.phases[i];
-      if(t<=p.t1||i===s.phases.length-1){ if(p.dwell)return p.d1;
-        var u=(t-p.t0)/Math.max(1e-4,p.t1-p.t0); u=ease(Math.max(0,Math.min(1,u)));
-        return p.d0+(p.d1-p.d0)*u; } }
-    return s.total;
+  function distAtTime(s,t){
+    if(t<=0)return 0; if(t>=s.time)return s.dist;
+    var lo=0,hi=s.K; while(lo<hi){ var mid=(lo+hi)>>1; if(s.T[mid]<=t)lo=mid+1; else hi=mid; }
+    var k=lo-1, tau=s.T[k+1]-s.T[k], f=tau>0?(t-s.T[k])/tau:0;
+    return Math.min(s.dist,(k+f)*s.step);
   }
 
   function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);
@@ -195,13 +202,14 @@ export function replayVideoHtml(): string {
     c.fillStyle=C.t3;c.font="700 "+(U*0.024)+"px "+C.sans;c.fillText("PERUN",W/2,H*0.66);
     c.textAlign="left";c.globalAlpha=1;}
 
-  function run(RUN){
+  // PREP: build the model, preload images, decode voice audio, build the schedule, draw a
+  // still first frame, then post "prepared" (with the estimated length). Does NOT record —
+  // the user picks ratio/pace first and taps Start (window.__start).
+  function prep(RUN){
     var m; try{ m=build(RUN); m.name=RUN.name||"Run"; }catch(e){ post({type:"error",msg:"build: "+e}); return; }
     var imgs=window.__imgs||{}, pend=[], k;
     for(k in imgs){ (function(im){ pend.push(new Promise(function(res){
       if(im.complete) return res(); im.onload=res; im.onerror=res; })); })(imgs[k]); }
-    // Decode voice notes into a shared AudioContext so they can be played into the
-    // recording. Best-effort — any failure just yields a silent (video-only) clip.
     var audio=null;
     try{
       var AC=window.AudioContext||window.webkitAudioContext;
@@ -215,12 +223,18 @@ export function replayVideoHtml(): string {
           }).catch(function(){}) ); });
       }
     }catch(e){ audio=null; }
-    Promise.all(pend).then(function(){ record(m,RUN.opts,audio); },function(){ record(m,RUN.opts,audio); });
+    var sched=buildSchedule(m,RUN.opts);
+    window.__ctx={m:m,opts:RUN.opts,audio:audio,imgs:imgs,sched:sched};
+    var est=0.9+sched.time+2.4;
+    Promise.all(pend).then(finish,finish);
+    function finish(){ try{ drawScene(m,0,imgs); }catch(e){} post({type:"prepared",durationS:est}); }
   }
 
-  function record(m,opts,audio){
-    var imgs=window.__imgs||{}, i;
-    var sched=buildSchedule(m,opts);
+  window.__start=function(){ if(!window.__ctx){ post({type:"error",msg:"not prepared"}); return; } window.__cancelled=false; record(window.__ctx); };
+  window.__cancel=function(){ window.__cancelled=true; };
+
+  function record(ctx){
+    var m=ctx.m,opts=ctx.opts,audio=ctx.audio,imgs=ctx.imgs,sched=ctx.sched,i;
     var tracks=cv.captureStream(30).getVideoTracks();
     var withAudio=!!(audio&&audio.dest);
     if(withAudio){ try{ if(audio.ctx.resume)audio.ctx.resume(); tracks=tracks.concat(audio.dest.stream.getAudioTracks()); }catch(e){ withAudio=false; } }
@@ -231,21 +245,24 @@ export function replayVideoHtml(): string {
     if(!mime){ post({type:"error",msg:"MediaRecorder/WebM not supported"}); return; }
     var rec; try{ rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:opts.bitrate||4000000}); }
     catch(e){ post({type:"error",msg:"recorder: "+e}); return; }
-    var chunks=[]; rec.ondataavailable=function(e){ if(e.data&&e.data.size) chunks.push(e.data); };
-    rec.onstop=function(){ var blob=new Blob(chunks,{type:mime}); var fr=new FileReader();
+    var chunks=[], aborted=false; rec.ondataavailable=function(e){ if(e.data&&e.data.size) chunks.push(e.data); };
+    rec.onstop=function(){ if(aborted){ post({type:"cancelled"}); return; }
+      var blob=new Blob(chunks,{type:mime}); var fr=new FileReader();
       fr.onloadend=function(){ post({type:"done",dataUrl:fr.result}); };
       fr.onerror=function(){ post({type:"error",msg:"read blob failed"}); }; fr.readAsDataURL(blob); };
 
-    var INTRO=0.9, DRAW=sched.total, OUTRO=2.4, TOTAL=INTRO+DRAW+OUTRO;
+    var INTRO=0.9, DRAW=sched.time, OUTRO=2.4, TOTAL=INTRO+DRAW+OUTRO;
     var t0=null, lastP=-1, played={};
     function post0(p){ p=Math.max(0,Math.min(1,p)); if(p-lastP>=0.02){lastP=p; post({type:"progress",p:p});} }
     rec.start();
     function frame(now){
+      if(window.__cancelled){ aborted=true; try{rec.stop();}catch(e){} return; }
       if(t0===null)t0=now; var el=(now-t0)/1000; post0(el/TOTAL);
       if(el<INTRO){ titleCard(m, Math.max(0,Math.min(1,el/0.3,(INTRO-el)/0.3))); }
       else if(el<INTRO+DRAW){ var d=distAtTime(sched,el-INTRO); drawScene(m,d,imgs);
         if(withAudio){ var j; for(j=0;j<m.annD.length;j++){ var a=m.annD[j];
-          if(a.kind==="voice"&&a.audio&&audio.buffers[a.dist]&&!played[a.dist]&&Math.abs(d-a.dist)<=Math.max(30,m.total*0.01)){
+          // Fire as we ENTER the slow zone so a voice note plays through the crawl.
+          if(a.kind==="voice"&&a.audio&&audio.buffers[a.dist]&&!played[a.dist]&&d>=a.dist-Math.min(m.total*0.06,120)){
             try{ var src=audio.ctx.createBufferSource(); src.buffer=audio.buffers[a.dist];
               src.connect(audio.dest); src.connect(audio.ctx.destination); src.start(); }catch(e){}
             played[a.dist]=true; } } } }
@@ -256,10 +273,10 @@ export function replayVideoHtml(): string {
     requestAnimationFrame(frame);
   }
 
-  // Entry point; RN injects window.__setRun(<json>) after receiving "ready".
+  // Entry point; RN injects window.__setRun(<json>) after "ready", then window.__start().
   window.__setRun=function(json){ try{ var RUN=(typeof json==="string")?JSON.parse(json):json;
     var imgs={}; (RUN.annotations||[]).forEach(function(a){ if(a.img){var im=new Image();im.src=a.img;imgs[a.text]=im;} });
-    window.__imgs=imgs; run(RUN); }catch(e){ post({type:"error",msg:"setRun: "+e}); } };
+    window.__imgs=imgs; prep(RUN); }catch(e){ post({type:"error",msg:"setRun: "+e}); } };
   post({type:"ready"});
 })();
 </script>

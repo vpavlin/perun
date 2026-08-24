@@ -2,7 +2,7 @@
   "expo": {
     "name": "Perun",
     "slug": "perun",
-    "version": "1.15.23",
+    "version": "1.15.24",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -19,7 +19,7 @@
     },
     "android": {
       "package": "xyz.vpavlin.perun",
-      "versionCode": 40,
+      "versionCode": 41,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"

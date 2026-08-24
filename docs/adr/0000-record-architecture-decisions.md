@@ -27,6 +27,7 @@ event-log/CRDT shape loam-sync formalizes. These ADRs record what is specific to
 - [0002](0002-local-first-content-addressed-blobs.md) — Annotation media is local-first and content-addressed; the server is a swappable replication backend, never the source of truth
 - [0003](0003-embedded-blob-hub.md) — The Basecamp module embeds the media blob hub (autostarts with it), so the desktop is the household media server
 - [0004](0004-logos-storage-direction.md) — Logos Storage (Codex `storage_module`) is the media backend direction — proposed, spiked on `spike/logos-storage`
+- [0005](0005-replay-video.md) — Replay → video: render the run deterministically to an offline WebView canvas and record it with MediaRecorder (smooth speed schedule, voice audio, aspect ratios, pace)
 
 ## Predating these ADRs
 
