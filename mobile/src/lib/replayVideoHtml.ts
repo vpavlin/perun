@@ -63,7 +63,7 @@ export function replayVideoHtml(): string {
     var minA=1e9,maxA=-1e9,gain=0;
     for(i=0;i<p.length;i++){var al=p[i].alt||0; if(al<minA)minA=al; if(al>maxA)maxA=al;
       if(i>0){var dd=(p[i].alt||0)-(p[i-1].alt||0); if(dd>0)gain+=dd;}}
-    return {p:p,cum:cum,total:total,proj:proj,annD:annD,minA:minA,maxA:maxA,gain:gain,W:W,H:H,U:Math.min(W,H),dur:run.points[p.length-1].t-run.points[0].t};
+    return {p:p,cum:cum,total:total,proj:proj,annD:annD,minA:minA,maxA:maxA,gain:gain,W:W,H:H,U:Math.min(W,H),mscale:s,moffx:offx,moffy:offy,basemap:null,dur:run.points[p.length-1].t-run.points[0].t};
   }
   function at(m,d){var p=m.p,cum=m.cum; d=Math.max(0,Math.min(m.total,d));
     var i=0; while(i<cum.length-1 && cum[i+1]<d) i++;
@@ -107,9 +107,41 @@ export function replayVideoHtml(): string {
   function panel(c,x,y,w,h,a){c.globalAlpha=a;c.fillStyle="rgba(16,20,25,0.86)";rr(c,x,y,w,h,16);c.fill();
     c.strokeStyle="rgba(60,72,84,0.9)";c.lineWidth=1.5;rr(c,x,y,w,h,16);c.stroke();c.globalAlpha=1;}
 
+  // Optional map basemap (opt-in; needs network). Tiles are loaded with crossOrigin so a
+  // provider WITHOUT CORS simply fails to load (skipped) rather than TAINTING the canvas —
+  // a tainted canvas would make MediaRecorder/captureStream throw. Same web-mercator frame
+  // as the route (m.mscale/moffx/moffy), so tiles register with the line exactly.
+  function loadBasemap(m,kind){
+    return new Promise(function(resolve){
+      var s=m.mscale,ox=m.moffx,oy=m.moffy,W=m.W,H=m.H;
+      var Z=Math.round(Math.log(s/256)/Math.LN2); Z=Math.max(2,Math.min(18,Z));
+      var n=Math.pow(2,Z), size=s/n;
+      var tx0=Math.max(0,Math.floor((0-ox)/s*n)), tx1=Math.min(n-1,Math.floor((W-ox)/s*n));
+      var ty0=Math.max(0,Math.floor((0-oy)/s*n)), ty1=Math.min(n-1,Math.floor((H-oy)/s*n));
+      var pend=[], loaded=[], cnt=0, MAXT=90, tx, ty;
+      for(tx=tx0;tx<=tx1;tx++){ for(ty=ty0;ty<=ty1;ty++){ if(cnt++>=MAXT) break;
+        (function(TX,TY){
+          var url = kind==="satellite"
+            ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"+Z+"/"+TY+"/"+TX
+            : "https://tile.openstreetmap.org/"+Z+"/"+TX+"/"+TY+".png";
+          pend.push(new Promise(function(res){ var im=new Image(); im.crossOrigin="anonymous";
+            im.onload=function(){ loaded.push({img:im,x:TX/n*s+ox,y:TY/n*s+oy,size:size}); res(); };
+            im.onerror=function(){ res(); }; im.src=url; }));
+        })(tx,ty); } }
+      Promise.all(pend).then(function(){
+        resolve({tiles:loaded, attrib: kind==="satellite" ? "Esri, Maxar, Earthstar Geographics" : "\\u00A9 OpenStreetMap"});
+      });
+    });
+  }
+
   function drawScene(m,d,imgs){
     var c=ctx,W=m.W,H=m.H,U=m.U,i;
     c.fillStyle=C.bg; c.fillRect(0,0,W,H);
+    if(m.basemap && m.basemap.tiles.length){
+      for(i=0;i<m.basemap.tiles.length;i++){ var tl=m.basemap.tiles[i];
+        try{ c.drawImage(tl.img,tl.x,tl.y,tl.size+1,tl.size+1); }catch(e){} }
+      c.fillStyle="rgba(7,9,11,0.42)"; c.fillRect(0,0,W,H); // scrim so the orange route pops
+    }
     var seg=[]; for(i=0;i<m.p.length;i++) seg.push(m.proj(m.p[i]));
     c.lineJoin="round"; c.lineCap="round";
     c.strokeStyle="rgba(224,147,47,0.14)"; c.lineWidth=U*0.006;
@@ -145,6 +177,8 @@ export function replayVideoHtml(): string {
     c.fillText("PERUN", W*0.045, H-U*0.225);
     c.textAlign="right"; c.fillStyle=C.t2; c.font="600 "+(U*0.02)+"px "+C.sans;
     c.fillText(m.name, W*0.955, H-U*0.225); c.textAlign="left";
+    if(m.basemap){ c.fillStyle="rgba(255,255,255,0.6)"; c.font="500 "+(U*0.015)+"px "+C.sans;
+      c.fillText(m.basemap.attrib, W*0.045, H-U*0.04); }
     vignette(c,W,H);
   }
   function stat(c,cx,by,k,v,al,U){c.textAlign=al==="l"?"left":al==="r"?"right":"center";
@@ -223,6 +257,8 @@ export function replayVideoHtml(): string {
           }).catch(function(){}) ); });
       }
     }catch(e){ audio=null; }
+    if(RUN.opts.basemap && RUN.opts.basemap!=="none"){
+      pend.push(loadBasemap(m,RUN.opts.basemap).then(function(bm){ m.basemap=bm; },function(){})); }
     var sched=buildSchedule(m,RUN.opts);
     window.__ctx={m:m,opts:RUN.opts,audio:audio,imgs:imgs,sched:sched};
     var est=0.9+sched.time+2.4;

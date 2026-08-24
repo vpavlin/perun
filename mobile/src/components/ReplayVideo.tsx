@@ -57,8 +57,16 @@ const RATIOS: Record<string, { w: number; h: number; label: string; hint: string
   portrait:  { w: 720,  h: 1280, label: "9:16", hint: "TikTok · Reels · Shorts" },
 };
 
+// Map background — opt-in (needs network; tiles are drawn CORS-safe so they can't taint
+// the canvas). "none" keeps the video fully offline.
+const BASEMAPS: { key: string; label: string }[] = [
+  { key: "none", label: "None · offline" },
+  { key: "streets", label: "Streets" },
+  { key: "satellite", label: "Satellite" },
+];
+
 /** Build the JSON the WebView renderer consumes. */
-async function buildPayload(run: Run, annotations: Annotation[], dims: { w: number; h: number }, pace: number) {
+async function buildPayload(run: Run, annotations: Annotation[], dims: { w: number; h: number }, pace: number, basemap: string) {
   const points = run.track.points.map((p) => ({ lat: p.lat, lon: p.lon, alt: p.alt ?? 0, t: p.t }));
   let photos = 0;
   const anns = [];
@@ -85,7 +93,7 @@ async function buildPayload(run: Run, annotations: Annotation[], dims: { w: numb
     // travelS = cruise time across the whole route (pace scales it). The playhead
     // decelerates into / crawls through / accelerates out of each annotation (readS, or a
     // voice note's length) — a smooth slow-through, not a hard stop.
-    opts: { travelS: BASE_TRAVEL / pace, readS: 3, width: dims.w, height: dims.h, bitrate },
+    opts: { travelS: BASE_TRAVEL / pace, readS: 3, width: dims.w, height: dims.h, bitrate, basemap },
   };
 }
 
@@ -101,6 +109,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   const [pace, setPace] = useState(1);         // committed pace (triggers a re-prep)
   const [paceLive, setPaceLive] = useState(1); // live while dragging (display only)
   const [est, setEst] = useState(0);           // accurate estimate from the renderer
+  const [basemap, setBasemap] = useState<string>("none");
 
   // Rebuild the payload + re-prep whenever the sheet opens, the ratio, or committed pace
   // changes. Clearing payloadRef ensures the WebView (which remounts) injects the fresh one.
@@ -110,12 +119,12 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     payloadRef.current = null;
     setPhase("prep"); setProgress(0); setErr("");
     setEst(estimateDuration(annotations, pace));
-    buildPayload(run, annotations, { w: ratio.w, h: ratio.h }, pace).then((p) => {
+    buildPayload(run, annotations, { w: ratio.w, h: ratio.h }, pace, basemap).then((p) => {
       if (alive) payloadRef.current = JSON.stringify(p);
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, run.id, ratioKey, pace]);
+  }, [visible, run.id, ratioKey, pace, basemap]);
 
   const shareWebm = async (dataUrl: string) => {
     setPhase("saving");
@@ -219,12 +228,29 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
           })}
         </View>
 
+        {/* Map background — opt-in (needs network); "None" keeps it fully offline. */}
+        <View style={styles.baseRow}>
+          {BASEMAPS.map((b) => {
+            const on = b.key === basemap;
+            return (
+              <Pressable
+                key={b.key}
+                style={[styles.baseChip, on && styles.ratioChipOn, busy && styles.ratioDisabled]}
+                disabled={busy}
+                onPress={() => setBasemap(b.key)}
+              >
+                <Text style={[styles.baseLabel, on && styles.ratioLabelOn]}>{b.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
         {/* WebView renders the animation live (visible so rAF isn't throttled) and records
             it — preview + encoder in one. key=ratio remounts it for a fresh render. */}
         <View style={[styles.stage, { width: sw, height: sh }]}>
           {visible && (
             <WebView
-              key={`${ratioKey}-${pace.toFixed(2)}`}
+              key={`${ratioKey}-${pace.toFixed(2)}-${basemap}`}
               ref={webRef}
               source={{ html: replayVideoHtml() }}
               originWhitelist={["*"]}
@@ -272,7 +298,10 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
           )}
         </View>
         {(phase === "prep" || phase === "ready" || phase === "rendering") && (
-          <Text style={styles.hint}>Pick a frame + pace, then Start. Keep the app in the foreground while it renders — all on-device, no network.</Text>
+          <Text style={styles.hint}>
+            Pick a frame + pace, then Start. Keep the app in the foreground while it renders.
+            {basemap === "none" ? " Fully on-device, no network." : " Map tiles are fetched from the network."}
+          </Text>
         )}
       </View>
     </Modal>
@@ -324,6 +353,9 @@ const styles = StyleSheet.create({
   ratioLabel: { color: theme.textSecondary, fontSize: 15, fontWeight: "700" },
   ratioLabelOn: { color: theme.primary },
   ratioHint: { color: theme.textTertiary, fontSize: 10, marginTop: 2 },
+  baseRow: { flexDirection: "row", gap: 8, justifyContent: "center", paddingHorizontal: 16, marginBottom: 12 },
+  baseChip: { flex: 1, alignItems: "center", paddingVertical: 7, borderRadius: 999, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
+  baseLabel: { color: theme.textSecondary, fontSize: 12, fontWeight: "600" },
   paceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, marginTop: 14 },
   paceCap: { color: theme.textTertiary, fontSize: 11 },
   paceEst: { color: theme.text, fontSize: 13, fontWeight: "700", minWidth: 42, textAlign: "right" },
