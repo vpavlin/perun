@@ -86,8 +86,6 @@ Item {
     onAnnotationsChanged: root.recomputeFeatured()
     onTrackPointsChanged: root.rebuildCum()
 
-    onSelectedRunChanged: { root.selectedAnnotation = -1; root.headIdx = 0; }
-
     function setMedia(blobId, val) {
         var m = {};
         for (var k in root.mediaUrls) m[k] = root.mediaUrls[k];
@@ -184,7 +182,7 @@ Item {
     // Selecting a run is the first point the backend connection is provably live
     // (trackJson resolves here). Retry the tile root then — the initial
     // Component.onCompleted attempt raced ahead of the connection.
-    onSelectedRunChanged: { applyTileRoot(); fetchTrack(); }
+    onSelectedRunChanged: { root.selectedAnnotation = -1; root.headIdx = 0; applyTileRoot(); fetchTrack(); }
 
     // Also retry when backend PROPs sync — a PROP update proves the replica is
     // connected, covering the case where runs load before any manual selection.
