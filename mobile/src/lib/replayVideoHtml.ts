@@ -284,7 +284,15 @@ export function replayVideoHtml(): string {
     var chunks=[], aborted=false; rec.ondataavailable=function(e){ if(e.data&&e.data.size) chunks.push(e.data); };
     rec.onstop=function(){ if(aborted){ post({type:"cancelled"}); return; }
       var blob=new Blob(chunks,{type:mime}); var fr=new FileReader();
-      fr.onloadend=function(){ post({type:"done",dataUrl:fr.result}); };
+      fr.onloadend=function(){
+        // Send the base64 in chunks — one giant postMessage gets truncated by the RN
+        // bridge (→ a corrupt, unplayable file). RN reassembles by index.
+        var url=String(fr.result); var b64=url.slice(url.indexOf(",")+1);
+        var CH=524288, total=Math.ceil(b64.length/CH), i;
+        post({type:"vstart",total:total,len:b64.length});
+        for(i=0;i<total;i++){ post({type:"vchunk",i:i,data:b64.slice(i*CH,(i+1)*CH)}); }
+        post({type:"vend"});
+      };
       fr.onerror=function(){ post({type:"error",msg:"read blob failed"}); }; fr.readAsDataURL(blob); };
 
     var INTRO=0.9, DRAW=sched.time, OUTRO=2.4, TOTAL=INTRO+DRAW+OUTRO;

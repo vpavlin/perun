@@ -101,6 +101,8 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   const annotations = useAnnotations(run.id);
   const webRef = useRef<WebView>(null);
   const payloadRef = useRef<string | null>(null);
+  const vchunks = useRef<(string | undefined)[]>([]); // reassembled video base64 chunks
+  const vlen = useRef(0);
   const [phase, setPhase] = useState<Phase>("prep");
   const [progress, setProgress] = useState(0);
   const [err, setErr] = useState<string>("");
@@ -126,10 +128,9 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, run.id, ratioKey, pace, basemap]);
 
-  const shareWebm = async (dataUrl: string) => {
+  const shareWebm = async (b64: string) => {
     setPhase("saving");
     try {
-      const b64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
       const bytes = toByteArray(b64);
       const safe = run.name.replace(/[^a-z0-9]+/gi, "-").slice(0, 40) || "run";
       const file = new File(Paths.cache, `perun-${safe}.webm`);
@@ -156,7 +157,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   };
 
   const onMessage = (raw: string) => {
-    let m: { type?: string; p?: number; dataUrl?: string; msg?: string; durationS?: number };
+    let m: { type?: string; p?: number; i?: number; data?: string; total?: number; len?: number; msg?: string; durationS?: number };
     try { m = JSON.parse(raw); } catch { return; }
     if (m.type === "ready") {
       // Hand the (already-built) payload to the renderer to PREP. Retry if not ready yet.
@@ -171,8 +172,23 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
       setPhase("ready");
     } else if (m.type === "progress") {
       setProgress(typeof m.p === "number" ? m.p : 0);
-    } else if (m.type === "done" && m.dataUrl) {
-      void shareWebm(m.dataUrl);
+    } else if (m.type === "vstart") {
+      vchunks.current = new Array(m.total || 0).fill(undefined);
+      vlen.current = m.len || 0;
+      setPhase("saving");
+    } else if (m.type === "vchunk") {
+      if (typeof m.i === "number" && typeof m.data === "string") vchunks.current[m.i] = m.data;
+    } else if (m.type === "vend") {
+      const parts = vchunks.current;
+      if (parts.some((p) => p === undefined)) {
+        setErr("video transfer dropped a chunk"); setPhase("error"); return;
+      }
+      const b64 = parts.join("");
+      if (vlen.current && b64.length !== vlen.current) {
+        setErr(`video transfer size mismatch (${b64.length}/${vlen.current})`); setPhase("error"); return;
+      }
+      vchunks.current = [];
+      void shareWebm(b64);
     } else if (m.type === "cancelled") {
       setProgress(0); setPhase("ready");
     } else if (m.type === "error") {
