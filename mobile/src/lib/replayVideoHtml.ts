@@ -63,7 +63,7 @@ export function replayVideoHtml(): string {
     var minA=1e9,maxA=-1e9,gain=0;
     for(i=0;i<p.length;i++){var al=p[i].alt||0; if(al<minA)minA=al; if(al>maxA)maxA=al;
       if(i>0){var dd=(p[i].alt||0)-(p[i-1].alt||0); if(dd>0)gain+=dd;}}
-    return {p:p,cum:cum,total:total,proj:proj,annD:annD,minA:minA,maxA:maxA,gain:gain,W:W,H:H,U:Math.min(W,H),mscale:s,moffx:offx,moffy:offy,basemap:null,dur:run.points[p.length-1].t-run.points[0].t};
+    return {p:p,cum:cum,total:total,proj:proj,annD:annD,minA:minA,maxA:maxA,gain:gain,W:W,H:H,U:Math.min(W,H),mscale:s,moffx:offx,moffy:offy,basemap:null,wmLogo:(run.opts&&run.opts.watermark?run.opts.watermark:""),wmImg:null,dur:run.points[p.length-1].t-run.points[0].t};
   }
   function at(m,d){var p=m.p,cum=m.cum; d=Math.max(0,Math.min(m.total,d));
     var i=0; while(i<cum.length-1 && cum[i+1]<d) i++;
@@ -182,10 +182,14 @@ export function replayVideoHtml(): string {
       var fade=Math.max(0,Math.min(1,1-(bg)/Math.max(80,m.total*0.05)));
       card(c,m,feat,near,0.35+0.65*fade,imgs); }
     // watermark (just above the elevation strip) + vignette
-    c.fillStyle=C.t3; c.textAlign="left"; c.font="700 "+(U*0.024)+"px "+C.sans;
-    c.fillText("PERUN", W*0.045, H-U*0.225);
-    c.textAlign="right"; c.fillStyle=C.t2; c.font="600 "+(U*0.02)+"px "+C.sans;
-    c.fillText(m.name, W*0.955, H-U*0.225); c.textAlign="left";
+    // Optional Perun-logo watermark (bottom-left) + run name. Off = nothing (clean video).
+    var wy=H-U*0.225;
+    if(m.wmImg && m.wmImg.complete && m.wmImg.width){
+      var lh=U*0.06, lw=lh*(m.wmImg.width/m.wmImg.height);
+      c.globalAlpha=0.92; c.drawImage(m.wmImg, W*0.045, wy-lh*0.72, lw, lh); c.globalAlpha=1;
+      c.textAlign="right"; c.fillStyle=C.t2; c.font="600 "+(U*0.02)+"px "+C.sans;
+      c.fillText(m.name, W*0.955, wy); c.textAlign="left";
+    }
     if(m.basemap){ c.fillStyle="rgba(255,255,255,0.6)"; c.font="500 "+(U*0.015)+"px "+C.sans;
       c.fillText(m.basemap.attrib, W*0.045, H-U*0.04); }
     vignette(c,W,H);
@@ -229,7 +233,7 @@ export function replayVideoHtml(): string {
 
   function titleCard(m,alpha){var c=ctx,W=m.W,H=m.H,U=m.U; c.fillStyle=C.bg;c.fillRect(0,0,W,H);
     c.globalAlpha=alpha; c.textAlign="center";
-    c.fillStyle=C.prim;c.font="800 "+(U*0.032)+"px "+C.sans;c.fillText("PERUN",W/2,H*0.42);
+    if(m.wmImg && m.wmImg.complete && m.wmImg.width){ var lhT=U*0.12, lwT=lhT*(m.wmImg.width/m.wmImg.height); c.drawImage(m.wmImg, W/2-lwT/2, H*0.29, lwT, lhT); }
     c.fillStyle=C.text;c.font="800 "+(U*0.062)+"px "+C.sans;c.fillText(m.name,W/2,H*0.5);
     c.fillStyle=C.t2;c.font="500 "+(U*0.03)+"px "+C.sans;
     c.fillText(fmtDist(m.total)+"  \\u00B7  "+fmtDur(m.dur/1000),W/2,H*0.565);
@@ -242,7 +246,7 @@ export function replayVideoHtml(): string {
     for(var i=0;i<stats.length;i++){var cx=W*(0.28+i*0.22);
       c.fillStyle=C.t3;c.font="600 "+(U*0.02)+"px "+C.sans;c.fillText(stats[i][0],cx,H*0.52);
       c.fillStyle=C.prim;c.font="800 "+(U*0.038)+"px "+C.sans;c.fillText(stats[i][1],cx,H*0.57);}
-    c.fillStyle=C.t3;c.font="700 "+(U*0.024)+"px "+C.sans;c.fillText("PERUN",W/2,H*0.66);
+    if(m.wmImg && m.wmImg.complete && m.wmImg.width){ var lhO=U*0.06, lwO=lhO*(m.wmImg.width/m.wmImg.height); c.drawImage(m.wmImg, W/2-lwO/2, H*0.63, lwO, lhO); }
     c.textAlign="left";c.globalAlpha=1;}
 
   // PREP: build the model, preload images, decode voice audio, build the schedule, draw a
@@ -253,6 +257,9 @@ export function replayVideoHtml(): string {
     var imgs=window.__imgs||{}, pend=[], k;
     for(k in imgs){ (function(im){ pend.push(new Promise(function(res){
       if(im.complete) return res(); im.onload=res; im.onerror=res; })); })(imgs[k]); }
+    // Optional watermark logo (data URI).
+    if(m.wmLogo){ var wi=new Image(); wi.src=m.wmLogo; m.wmImg=wi;
+      pend.push(new Promise(function(res){ if(wi.complete) return res(); wi.onload=res; wi.onerror=res; })); }
     var audio=null;
     try{
       var AC=window.AudioContext||window.webkitAudioContext;

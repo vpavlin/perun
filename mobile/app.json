@@ -2,7 +2,7 @@
   "expo": {
     "name": "Perun",
     "slug": "perun",
-    "version": "1.15.30",
+    "version": "1.15.31",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -19,7 +19,7 @@
     },
     "android": {
       "package": "xyz.vpavlin.perun",
-      "versionCode": 47,
+      "versionCode": 48,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
@@ -69,7 +69,8 @@
         {
           "microphonePermission": "Perun records voice notes to attach to points on your route."
         }
-      ]
+      ],
+      "expo-asset"
     ]
   }
 }

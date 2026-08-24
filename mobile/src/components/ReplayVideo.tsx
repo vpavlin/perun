@@ -12,6 +12,7 @@ import {
 import { WebView } from "react-native-webview";
 import { File, Directory, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import { Asset } from "expo-asset";
 import { fromByteArray, toByteArray } from "base64-js";
 import { Run } from "../lib/types";
 import { Annotation, useAnnotations } from "../lib/annotations";
@@ -58,6 +59,22 @@ function estimateDuration(annotations: Annotation[], pace: number): number {
   return 0.9 + BASE_TRAVEL / pace + read + 2.4;
 }
 
+// The Perun logo as a data URI (cached) — embedded so the WebView can draw the optional
+// watermark self-contained.
+let logoCache: string | null = null;
+async function perunLogoDataUri(): Promise<string> {
+  if (logoCache != null) return logoCache;
+  try {
+    const asset = Asset.fromModule(require("../../assets/icon.png"));
+    await asset.downloadAsync();
+    const uri = asset.localUri || asset.uri;
+    logoCache = `data:image/png;base64,${fromByteArray(await readFileBytes(uri))}`;
+  } catch {
+    logoCache = "";
+  }
+  return logoCache;
+}
+
 /** Read a locally-held blob and return a data: URI, or null if we don't have it. */
 async function blobDataUri(a: Annotation, fallbackMime: string): Promise<string | null> {
   if (!a.blobId) return null;
@@ -88,7 +105,7 @@ const BASEMAPS: { key: string; label: string }[] = [
 ];
 
 /** Build the JSON the WebView renderer consumes. */
-async function buildPayload(run: Run, annotations: Annotation[], dims: { w: number; h: number }, pace: number, basemap: string) {
+async function buildPayload(run: Run, annotations: Annotation[], dims: { w: number; h: number }, pace: number, basemap: string, watermark: string) {
   const points = run.track.points.map((p) => ({ lat: p.lat, lon: p.lon, alt: p.alt ?? 0, t: p.t }));
   let photos = 0;
   const anns = [];
@@ -115,7 +132,7 @@ async function buildPayload(run: Run, annotations: Annotation[], dims: { w: numb
     // travelS = cruise time across the whole route (pace scales it). The playhead
     // decelerates into / crawls through / accelerates out of each annotation (readS, or a
     // voice note's length) — a smooth slow-through, not a hard stop.
-    opts: { travelS: BASE_TRAVEL / pace, readS: 3, width: dims.w, height: dims.h, bitrate, basemap },
+    opts: { travelS: BASE_TRAVEL / pace, readS: 3, width: dims.w, height: dims.h, bitrate, basemap, watermark },
   };
 }
 
@@ -135,6 +152,10 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   const [est, setEst] = useState(0);           // accurate estimate from the renderer
   const [basemap, setBasemap] = useState<string>("none");
   const [sizeMb, setSizeMb] = useState(0);
+  const [wmOn, setWmOn] = useState(true);   // optional Perun-logo watermark (default on)
+  const [logoUri, setLogoUri] = useState("");
+  useEffect(() => { perunLogoDataUri().then(setLogoUri); }, []);
+  const watermark = wmOn ? logoUri : "";
   const runSafe = run.name.replace(/[^a-z0-9]+/gi, "-").slice(0, 40) || "run";
   const [saved, setSaved] = useState<Saved[]>([]);
   const refreshSaved = () => setSaved(listSaved(runSafe));
@@ -148,12 +169,12 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     payloadRef.current = null;
     setPhase("prep"); setProgress(0); setErr("");
     setEst(estimateDuration(annotations, pace));
-    buildPayload(run, annotations, { w: ratio.w, h: ratio.h }, pace, basemap).then((p) => {
+    buildPayload(run, annotations, { w: ratio.w, h: ratio.h }, pace, basemap, watermark).then((p) => {
       if (alive) payloadRef.current = JSON.stringify(p);
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, run.id, ratioKey, pace, basemap]);
+  }, [visible, run.id, ratioKey, pace, basemap, watermark]);
 
   const shareWebm = async (b64: string) => {
     setPhase("saving");
@@ -301,12 +322,24 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
           })}
         </View>
 
+        {/* Optional watermark — the Perun logo. Off = no branding at all. */}
+        <View style={styles.wmRow}>
+          <Text style={styles.wmLabel}>Watermark</Text>
+          <Pressable
+            style={[styles.wmChip, wmOn && styles.ratioChipOn, busy && styles.ratioDisabled]}
+            disabled={busy}
+            onPress={() => setWmOn((v) => !v)}
+          >
+            <Text style={[styles.wmChipText, wmOn && styles.ratioLabelOn]}>{wmOn ? "◉ Perun logo" : "◎ Off"}</Text>
+          </Pressable>
+        </View>
+
         {/* WebView renders the animation live (visible so rAF isn't throttled) and records
             it — preview + encoder in one. key=ratio remounts it for a fresh render. */}
         <View style={[styles.stage, { width: sw, height: sh }]}>
           {visible && (
             <WebView
-              key={`${ratioKey}-${pace.toFixed(2)}-${basemap}`}
+              key={`${ratioKey}-${pace.toFixed(2)}-${basemap}-${wmOn ? "wm" : "no"}`}
               ref={webRef}
               source={{ html: replayVideoHtml() }}
               originWhitelist={["*"]}
@@ -432,6 +465,10 @@ const styles = StyleSheet.create({
   baseRow: { flexDirection: "row", gap: 8, justifyContent: "center", paddingHorizontal: 16, marginBottom: 12 },
   baseChip: { flex: 1, alignItems: "center", paddingVertical: 7, borderRadius: 999, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
   baseLabel: { color: theme.textSecondary, fontSize: 12, fontWeight: "600" },
+  wmRow: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", paddingHorizontal: 16, marginBottom: 12 },
+  wmLabel: { color: theme.textTertiary, fontSize: 12 },
+  wmChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
+  wmChipText: { color: theme.textSecondary, fontSize: 13, fontWeight: "600" },
   paceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, marginTop: 14 },
   paceCap: { color: theme.textTertiary, fontSize: 11 },
   paceEst: { color: theme.text, fontSize: 13, fontWeight: "700", minWidth: 42, textAlign: "right" },
