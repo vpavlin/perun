@@ -18,7 +18,7 @@ export function replayVideoHtml(): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vw}</style>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100%;height:100%}</style>
 </head><body>
 <canvas id="c" width="1000" height="1000"></canvas>
 <script>
@@ -46,7 +46,7 @@ export function replayVideoHtml(): string {
   var cv=document.getElementById("c"), ctx=cv.getContext("2d");
 
   function build(run){
-    var W=run.opts.size, H=run.opts.size; cv.width=W; cv.height=H;
+    var W=run.opts.width||run.opts.size||900, H=run.opts.height||run.opts.size||900; cv.width=W; cv.height=H;
     var p=run.points, cum=[0], i;
     for(i=1;i<p.length;i++) cum[i]=cum[i-1]+hav(p[i-1],p[i]);
     var total=cum[cum.length-1];
@@ -63,7 +63,7 @@ export function replayVideoHtml(): string {
     var minA=1e9,maxA=-1e9,gain=0;
     for(i=0;i<p.length;i++){var al=p[i].alt||0; if(al<minA)minA=al; if(al>maxA)maxA=al;
       if(i>0){var dd=(p[i].alt||0)-(p[i-1].alt||0); if(dd>0)gain+=dd;}}
-    return {p:p,cum:cum,total:total,proj:proj,annD:annD,minA:minA,maxA:maxA,gain:gain,W:W,H:H,dur:run.points[p.length-1].t-run.points[0].t};
+    return {p:p,cum:cum,total:total,proj:proj,annD:annD,minA:minA,maxA:maxA,gain:gain,W:W,H:H,U:Math.min(W,H),dur:run.points[p.length-1].t-run.points[0].t};
   }
   function at(m,d){var p=m.p,cum=m.cum; d=Math.max(0,Math.min(m.total,d));
     var i=0; while(i<cum.length-1 && cum[i+1]<d) i++;
@@ -101,51 +101,48 @@ export function replayVideoHtml(): string {
     c.strokeStyle="rgba(60,72,84,0.9)";c.lineWidth=1.5;rr(c,x,y,w,h,16);c.stroke();c.globalAlpha=1;}
 
   function drawScene(m,d,imgs){
-    var c=ctx,W=m.W,H=m.H,i;
+    var c=ctx,W=m.W,H=m.H,U=m.U,i;
     c.fillStyle=C.bg; c.fillRect(0,0,W,H);
-    // faint whole route
     var seg=[]; for(i=0;i<m.p.length;i++) seg.push(m.proj(m.p[i]));
     c.lineJoin="round"; c.lineCap="round";
-    c.strokeStyle="rgba(224,147,47,0.14)"; c.lineWidth=W*0.006;
+    c.strokeStyle="rgba(224,147,47,0.14)"; c.lineWidth=U*0.006;
     c.beginPath(); for(i=0;i<seg.length;i++){var pt=seg[i]; if(i)c.lineTo(pt[0],pt[1]);else c.moveTo(pt[0],pt[1]);} c.stroke();
-    // travelled portion, glowing
     var hp=m.proj(at(m,d));
-    c.save(); c.shadowColor=C.prim; c.shadowBlur=W*0.02;
-    c.strokeStyle=C.prim; c.lineWidth=W*0.0075; c.beginPath();
+    c.save(); c.shadowColor=C.prim; c.shadowBlur=U*0.02;
+    c.strokeStyle=C.prim; c.lineWidth=U*0.0075; c.beginPath();
     var started=false;
     for(i=0;i<m.p.length;i++){ if(m.cum[i]>d) break; var q=seg[i];
       if(started)c.lineTo(q[0],q[1]); else {c.moveTo(q[0],q[1]);started=true;} }
     if(started) c.lineTo(hp[0],hp[1]); else { c.moveTo(seg[0][0],seg[0][1]); }
     c.stroke(); c.restore();
-    // start dot
-    c.fillStyle=C.ok; c.beginPath(); c.arc(seg[0][0],seg[0][1],W*0.009,0,7); c.fill();
-    // comet head
-    c.save(); c.shadowColor=C.prim2; c.shadowBlur=W*0.035;
-    c.fillStyle="rgba(224,147,47,0.28)"; c.beginPath(); c.arc(hp[0],hp[1],W*0.022,0,7); c.fill();
-    c.fillStyle=C.prim2; c.beginPath(); c.arc(hp[0],hp[1],W*0.011,0,7); c.fill(); c.restore();
-    // stat bar
-    var head=at(m,d), el=(head.t-m.p[0].t)/1000;
-    panel(c,W*0.04,W*0.04,W*0.92,W*0.12,1);
-    stat(c,W*0.075,W*0.115,"DISTANCE",fmtDist(d),"l",W);
-    stat(c,W/2,W*0.115,"TIME",fmtDur(el),"c",W);
-    stat(c,W*0.925,W*0.115,"ELEV",Math.round(head.alt)+" m","r",W);
-    // elevation strip
-    elev(c,m,d,W*0.04,H-W*0.20,W*0.92,W*0.15);
-    // featured annotation
+    c.fillStyle=C.ok; c.beginPath(); c.arc(seg[0][0],seg[0][1],U*0.009,0,7); c.fill();
+    c.save(); c.shadowColor=C.prim2; c.shadowBlur=U*0.035;
+    c.fillStyle="rgba(224,147,47,0.28)"; c.beginPath(); c.arc(hp[0],hp[1],U*0.022,0,7); c.fill();
+    c.fillStyle=C.prim2; c.beginPath(); c.arc(hp[0],hp[1],U*0.011,0,7); c.fill(); c.restore();
+    // stat bar (top) — width anchored to W, sizes to U
+    var head=at(m,d), el=(head.t-m.p[0].t)/1000, barY=U*0.04, barH=U*0.13;
+    panel(c,W*0.04,barY,W*0.92,barH,1);
+    var sb=barY+barH*0.72;
+    stat(c,W*0.075,sb,"DISTANCE",fmtDist(d),"l",U);
+    stat(c,W/2,sb,"TIME",fmtDur(el),"c",U);
+    stat(c,W*0.925,sb,"ELEV",Math.round(head.alt)+" m","r",U);
+    // elevation strip (bottom)
+    elev(c,m,d,W*0.04,H-U*0.20,W*0.92,U*0.14);
+    // featured annotation card (right)
     var feat=null,bg=1e18; for(i=0;i<m.annD.length;i++){var g=Math.abs(m.annD[i].dist-d); if(g<bg){bg=g;feat=m.annD[i];}}
     if(feat){ var near=bg<=Math.max(60,m.total*0.03);
       var fade=Math.max(0,Math.min(1,1-(bg)/Math.max(80,m.total*0.05)));
-      card(c,m,feat,near,0.35+0.65*fade,imgs,W,H); }
-    // watermark + vignette
-    c.fillStyle=C.t3; c.textAlign="left"; c.font="700 "+(W*0.024)+"px "+C.sans;
-    c.fillText("PERUN", W*0.045, H-W*0.205);
-    c.textAlign="right"; c.fillStyle=C.t2; c.font="600 "+(W*0.02)+"px "+C.sans;
-    c.fillText(m.name, W*0.955, H-W*0.205); c.textAlign="left";
+      card(c,m,feat,near,0.35+0.65*fade,imgs); }
+    // watermark (just above the elevation strip) + vignette
+    c.fillStyle=C.t3; c.textAlign="left"; c.font="700 "+(U*0.024)+"px "+C.sans;
+    c.fillText("PERUN", W*0.045, H-U*0.225);
+    c.textAlign="right"; c.fillStyle=C.t2; c.font="600 "+(U*0.02)+"px "+C.sans;
+    c.fillText(m.name, W*0.955, H-U*0.225); c.textAlign="left";
     vignette(c,W,H);
   }
-  function stat(c,cx,by,k,v,al,W){c.textAlign=al==="l"?"left":al==="r"?"right":"center";
-    c.fillStyle=C.t3;c.font="600 "+(W*0.02)+"px "+C.sans;c.fillText(k,cx,by-W*0.035);
-    c.fillStyle=C.text;c.font="800 "+(W*0.048)+"px "+C.sans;c.fillText(v,cx,by+W*0.01);c.textAlign="left";}
+  function stat(c,cx,by,k,v,al,U){c.textAlign=al==="l"?"left":al==="r"?"right":"center";
+    c.fillStyle=C.t3;c.font="600 "+(U*0.02)+"px "+C.sans;c.fillText(k,cx,by-U*0.035);
+    c.fillStyle=C.text;c.font="800 "+(U*0.046)+"px "+C.sans;c.fillText(v,cx,by+U*0.008);c.textAlign="left";}
   function elev(c,m,d,x,y,w,h){panel(c,x,y,w,h,1);var pad=w*0.02,spanA=Math.max(1,m.maxA-m.minA),i;
     function X(dd){return x+pad+(dd/m.total)*(w-2*pad);} function Y(a){return y+h-pad-((a-m.minA)/spanA)*(h-2*pad);}
     c.beginPath();c.moveTo(X(0),y+h-pad);
@@ -156,45 +153,46 @@ export function replayVideoHtml(): string {
     var hx=X(Math.max(0,Math.min(m.total,d)));
     c.strokeStyle=C.text;c.globalAlpha=.85;c.lineWidth=w*0.0035;
     c.beginPath();c.moveTo(hx,y+pad);c.lineTo(hx,y+h-pad);c.stroke();c.globalAlpha=1;}
-  function card(c,m,a,near,alpha,imgs,W,H){
-    var w=W*0.52,x=W-w-W*0.045,y=W*0.2,im=a.kind==="photo"&&imgs[a.text]&&imgs[a.text].complete?imgs[a.text]:null;
-    var h=im?W*0.42:W*0.15;
+  function card(c,m,a,near,alpha,imgs){
+    var W=m.W,U=m.U;
+    var im=a.kind==="photo"&&imgs[a.text]&&imgs[a.text].complete?imgs[a.text]:null;
+    var w=Math.min(W*0.5,U*0.62), x=W-w-U*0.045, y=U*0.20, h=im?U*0.46:U*0.16;
     panel(c,x,y,w,h,near?1:alpha);
     c.fillStyle=a.kind==="photo"?C.photo:a.kind==="voice"?C.voice:C.prim;
-    c.font="700 "+(W*0.03)+"px "+C.sans; c.fillText(KIND[a.kind]||"\\u2022",x+W*0.02,y+W*0.045);
-    c.fillStyle=C.t2; c.font="600 "+(W*0.02)+"px "+C.sans;
-    c.fillText(near?"\\u25CF at this point":fmtDist(a.dist),x+W*0.06,y+W*0.043);
-    if(im){var iw=w-W*0.04,ih=W*0.24,ix=x+W*0.02,iy=y+W*0.06;
+    c.font="700 "+(U*0.03)+"px "+C.sans; c.fillText(KIND[a.kind]||"\\u2022",x+U*0.022,y+U*0.05);
+    c.fillStyle=C.t2; c.font="600 "+(U*0.02)+"px "+C.sans;
+    c.fillText(near?"\\u25CF at this point":fmtDist(a.dist),x+U*0.07,y+U*0.047);
+    if(im){var iw=w-U*0.044,ih=U*0.26,ix=x+U*0.022,iy=y+U*0.066;
       rr(c,ix,iy,iw,ih,10);c.save();c.clip();
       var ar=im.width/im.height,tr=iw/ih,dw,dh; if(ar>tr){dh=ih;dw=ih*ar;}else{dw=iw;dh=iw/ar;}
       c.drawImage(im,ix+(iw-dw)/2,iy+(ih-dh)/2,dw,dh);c.restore();}
-    if(a.text){c.fillStyle=C.text;c.font="500 "+(W*0.026)+"px "+C.sans;
-      wrap(c,a.text,x+W*0.02,y+(im?W*0.34:W*0.095),w-W*0.04,W*0.032);}
+    if(a.text){c.fillStyle=C.text;c.font="500 "+(U*0.026)+"px "+C.sans;
+      wrap(c,a.text,x+U*0.022,y+(im?U*0.37:U*0.10),w-U*0.044,U*0.034);}
   }
   function wrap(c,text,x,y,maxw,lh){var words=String(text).split(" "),line="",yy=y,i;
     for(i=0;i<words.length;i++){var t=line?line+" "+words[i]:words[i];
       if(c.measureText(t).width>maxw&&line){c.fillText(line,x,yy);line=words[i];yy+=lh;}else line=t;}
     if(line)c.fillText(line,x,yy);}
-  function vignette(c,W,H){var g=c.createRadialGradient(W/2,H/2,W*0.35,W/2,H/2,W*0.72);
+  function vignette(c,W,H){var R=Math.max(W,H); var g=c.createRadialGradient(W/2,H/2,R*0.32,W/2,H/2,R*0.62);
     g.addColorStop(0,"rgba(0,0,0,0)");g.addColorStop(1,"rgba(0,0,0,0.45)");
     c.fillStyle=g;c.fillRect(0,0,W,H);}
 
-  function titleCard(m,alpha){var c=ctx,W=m.W,H=m.H; c.fillStyle=C.bg;c.fillRect(0,0,W,H);
+  function titleCard(m,alpha){var c=ctx,W=m.W,H=m.H,U=m.U; c.fillStyle=C.bg;c.fillRect(0,0,W,H);
     c.globalAlpha=alpha; c.textAlign="center";
-    c.fillStyle=C.prim;c.font="800 "+(W*0.03)+"px "+C.sans;c.fillText("PERUN",W/2,H*0.42);
-    c.fillStyle=C.text;c.font="800 "+(W*0.06)+"px "+C.sans;c.fillText(m.name,W/2,H*0.5);
-    c.fillStyle=C.t2;c.font="500 "+(W*0.028)+"px "+C.sans;
-    c.fillText(fmtDist(m.total)+"  \\u00B7  "+fmtDur(m.dur/1000),W/2,H*0.56);
+    c.fillStyle=C.prim;c.font="800 "+(U*0.032)+"px "+C.sans;c.fillText("PERUN",W/2,H*0.42);
+    c.fillStyle=C.text;c.font="800 "+(U*0.062)+"px "+C.sans;c.fillText(m.name,W/2,H*0.5);
+    c.fillStyle=C.t2;c.font="500 "+(U*0.03)+"px "+C.sans;
+    c.fillText(fmtDist(m.total)+"  \\u00B7  "+fmtDur(m.dur/1000),W/2,H*0.565);
     c.textAlign="left"; c.globalAlpha=1; vignette(c,W,H);}
-  function outroCard(m,alpha){var c=ctx,W=m.W,H=m.H; drawScene(m,m.total,{}); // route full behind
+  function outroCard(m,alpha){var c=ctx,W=m.W,H=m.H,U=m.U; drawScene(m,m.total,{}); // route full behind
     c.fillStyle="rgba(7,9,11,"+(0.72*alpha)+")";c.fillRect(0,0,W,H);
     c.globalAlpha=alpha;c.textAlign="center";
-    c.fillStyle=C.text;c.font="800 "+(W*0.05)+"px "+C.sans;c.fillText(m.name,W/2,H*0.4);
+    c.fillStyle=C.text;c.font="800 "+(U*0.052)+"px "+C.sans;c.fillText(m.name,W/2,H*0.4);
     var stats=[["Distance",fmtDist(m.total)],["Time",fmtDur(m.dur/1000)],["Elevation","+"+Math.round(m.gain)+" m"]];
     for(var i=0;i<stats.length;i++){var cx=W*(0.28+i*0.22);
-      c.fillStyle=C.t3;c.font="600 "+(W*0.02)+"px "+C.sans;c.fillText(stats[i][0],cx,H*0.52);
-      c.fillStyle=C.prim;c.font="800 "+(W*0.036)+"px "+C.sans;c.fillText(stats[i][1],cx,H*0.57);}
-    c.fillStyle=C.t3;c.font="700 "+(W*0.024)+"px "+C.sans;c.fillText("PERUN",W/2,H*0.66);
+      c.fillStyle=C.t3;c.font="600 "+(U*0.02)+"px "+C.sans;c.fillText(stats[i][0],cx,H*0.52);
+      c.fillStyle=C.prim;c.font="800 "+(U*0.038)+"px "+C.sans;c.fillText(stats[i][1],cx,H*0.57);}
+    c.fillStyle=C.t3;c.font="700 "+(U*0.024)+"px "+C.sans;c.fillText("PERUN",W/2,H*0.66);
     c.textAlign="left";c.globalAlpha=1;}
 
   function run(RUN){

@@ -37,8 +37,15 @@ async function blobDataUri(a: Annotation, fallbackMime: string): Promise<string 
   }
 }
 
+// Aspect-ratio presets — pick the frame for the destination platform.
+const RATIOS: Record<string, { w: number; h: number; label: string; hint: string }> = {
+  square:    { w: 900,  h: 900,  label: "1:1",  hint: "Instagram" },
+  landscape: { w: 1280, h: 720,  label: "16:9", hint: "YouTube" },
+  portrait:  { w: 720,  h: 1280, label: "9:16", hint: "TikTok · Reels · Shorts" },
+};
+
 /** Build the JSON the WebView renderer consumes. */
-async function buildPayload(run: Run, annotations: Annotation[]) {
+async function buildPayload(run: Run, annotations: Annotation[], dims: { w: number; h: number }) {
   const points = run.track.points.map((p) => ({ lat: p.lat, lon: p.lon, alt: p.alt ?? 0, t: p.t }));
   let photos = 0;
   const anns = [];
@@ -56,13 +63,15 @@ async function buildPayload(run: Run, annotations: Annotation[]) {
     }
     anns.push({ t: a.t, kind: a.kind, text: a.text || "", dur: a.dur, img, audio });
   }
+  // Scale the bitrate with the frame so bigger ratios don't look soft (capped for the bridge).
+  const bitrate = Math.min(6_500_000, Math.round(4_000_000 * (Math.max(dims.w, dims.h) / 900)));
   return {
     name: run.name,
     points,
     annotations: anns,
     // The clip pauses (dwells) at each annotation so it's readable; a voice dwell stretches
     // to the note's length. travel = glide time across the whole route.
-    opts: { travelS: 9, dwellS: 3, dwellCap: 16, size: 900, bitrate: 4_000_000 },
+    opts: { travelS: 9, dwellS: 3, dwellCap: 16, width: dims.w, height: dims.h, bitrate },
   };
 }
 
@@ -73,18 +82,22 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   const [phase, setPhase] = useState<Phase>("prep");
   const [progress, setProgress] = useState(0);
   const [err, setErr] = useState<string>("");
+  const [ratioKey, setRatioKey] = useState<string>("square");
+  const ratio = RATIOS[ratioKey];
 
-  // Assemble the payload whenever the sheet opens (fresh, in case annotations changed).
+  // Rebuild the payload whenever the sheet opens or the aspect ratio changes. Clearing
+  // payloadRef first ensures the WebView (which remounts per ratio) injects the fresh one.
   useEffect(() => {
     if (!visible) return;
     let alive = true;
+    payloadRef.current = null;
     setPhase("prep"); setProgress(0); setErr("");
-    buildPayload(run, annotations).then((p) => {
+    buildPayload(run, annotations, { w: ratio.w, h: ratio.h }).then((p) => {
       if (alive) payloadRef.current = JSON.stringify(p);
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, run.id]);
+  }, [visible, run.id, ratioKey]);
 
   const shareWebm = async (dataUrl: string) => {
     setPhase("saving");
@@ -129,12 +142,21 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     }
   };
 
-  const W = Dimensions.get("window").width;
+  // Fit the stage to the chosen aspect within the available area (preview only; the
+  // recorded resolution is the payload's width/height).
+  const win = Dimensions.get("window");
+  const availW = win.width - 32;
+  const availH = win.height * 0.54;
+  const scale = Math.min(availW / ratio.w, availH / ratio.h);
+  const sw = Math.round(ratio.w * scale);
+  const sh = Math.round(ratio.h * scale);
+  const busy = phase === "rendering" || phase === "saving";
+
   const label =
     phase === "prep" ? "Preparing…"
     : phase === "rendering" ? `Rendering… ${Math.round(progress * 100)}%`
     : phase === "saving" ? "Saving + sharing…"
-    : phase === "done" ? "Shared ✓"
+    : phase === "done" ? "Shared ✓ — pick another ratio to make another"
     : phase === "unsupported" ? "This device's WebView can't record video"
     : phase === "error" ? `Failed: ${err}`
     : "";
@@ -147,11 +169,30 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
           <Pressable onPress={onClose} hitSlop={12}><Text style={styles.close}>Done</Text></Pressable>
         </View>
 
-        {/* The WebView renders the animation live (visible so requestAnimationFrame isn't
-            throttled) and records it. It's the preview + the encoder in one. */}
-        <View style={[styles.stage, { width: W, height: W }]}>
+        {/* Aspect-ratio picker — each re-renders the clip at that frame. */}
+        <View style={styles.ratios}>
+          {Object.keys(RATIOS).map((k) => {
+            const r = RATIOS[k]; const on = k === ratioKey;
+            return (
+              <Pressable
+                key={k}
+                style={[styles.ratioChip, on && styles.ratioChipOn, busy && styles.ratioDisabled]}
+                disabled={busy}
+                onPress={() => setRatioKey(k)}
+              >
+                <Text style={[styles.ratioLabel, on && styles.ratioLabelOn]}>{r.label}</Text>
+                <Text style={styles.ratioHint}>{r.hint}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* WebView renders the animation live (visible so rAF isn't throttled) and records
+            it — preview + encoder in one. key=ratio remounts it for a fresh render. */}
+        <View style={[styles.stage, { width: sw, height: sh }]}>
           {visible && (
             <WebView
+              key={ratioKey}
               ref={webRef}
               source={{ html: replayVideoHtml() }}
               originWhitelist={["*"]}
@@ -182,6 +223,13 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10 },
   title: { color: theme.text, fontSize: 18, fontWeight: "700", flexShrink: 1, paddingRight: 12 },
   close: { color: theme.primary, fontSize: 16, fontWeight: "600" },
+  ratios: { flexDirection: "row", gap: 8, justifyContent: "center", paddingHorizontal: 16, marginBottom: 12 },
+  ratioChip: { flex: 1, alignItems: "center", paddingVertical: 8, borderRadius: 11, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
+  ratioChipOn: { backgroundColor: theme.elevated, borderColor: theme.primary },
+  ratioDisabled: { opacity: 0.45 },
+  ratioLabel: { color: theme.textSecondary, fontSize: 15, fontWeight: "700" },
+  ratioLabelOn: { color: theme.primary },
+  ratioHint: { color: theme.textTertiary, fontSize: 10, marginTop: 2 },
   stage: { backgroundColor: "#000", alignSelf: "center" },
   bar: { height: 4, backgroundColor: theme.card, marginHorizontal: 16, marginTop: 18, borderRadius: 2, overflow: "hidden" },
   barFill: { height: 4, backgroundColor: theme.primary },
