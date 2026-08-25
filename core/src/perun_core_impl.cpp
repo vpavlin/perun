@@ -408,19 +408,26 @@ void PerunCoreImpl::bootstrap() {
     }
   });
 
-  // FLEET = logos.test (cluster 2). The canonical kym_core/scala cfg: the layered
-  // createNode shape {mode, preset, messagingOverrides:{...}} where the logos.test
-  // preset supplies the fleet discv5 bootstrap. Do NOT pin bare top-level entryNodes
-  // (v0.2.0's strict parser rejects them); discv5-udp-port MUST be present + FIXED, or
-  // discv5 discovery never meshes and the node stays at 0 peers (an ephemeral 0 breaks
-  // discovery). A hub injects entryNodes via PERUN_DELIVERY_CFG (merged over this).
+  // FLEET = logos.test (cluster 2). Matches kym_core's proven createNode shape for the
+  // custom Reliable-Channels delivery (8ad99f10): {mode, preset, entryNodes:[...]} — this
+  // delivery's parser REJECTS `messagingOverrides` (the old v0.1.3/v0.2.0 shape) and accepts
+  // TOP-LEVEL entryNodes (the 6 logos.test fleet nodes) as explicit bootstrap peers, which is
+  // what actually meshes the node reliably (preset discv5 alone peer-drops). A standalone hub
+  // adds tcpPort/discv5UdpPort via PERUN_DELIVERY_CFG (camelCase, this delivery's schema); the
+  // crib shares one node (first createNode wins) so the cores need no per-core ports there.
   // useChannels/hubMode are loam-only flags loam_core strips before forwarding the rest.
+  QJsonArray entryNodes{
+      "/dns4/node-01.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmQ9X2xDfPG3uL77V9piYDhjq14JhKCtcmNYsTMKNqrKCj",
+      "/dns4/node-02.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmB8NYprrfQrgWVzsJtYWkfjsXbmJEGNMG6othXsQ53BwG",
+      "/dns4/node-01.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmF8WtwGPmeGHgYAX2277jHgy5cW9F7zsB8EqUjBZQAZQ3",
+      "/dns4/node-02.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmUuXhUW9bdJpzN1kfDziFiUZo4bszTk66cvr7uuyCHXR7",
+      "/dns4/node-01.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmL3oU95jh1BZHozn3uNhx8HEneirgr8M1jEAapzXGDqRF",
+      "/dns4/node-02.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAm28CoBZjpyxsanC8tQpbvZ7bZJnVYuB1EgFzb571qpWsV"};
   QJsonObject cfg{
       {"mode", "Core"},
       {"preset", "logos.test"},
-      {"messagingOverrides", QJsonObject{{"logLevel", "INFO"},
-                                         {"tcp-port", 30303},
-                                         {"discv5-udp-port", 9000}}},
+      {"relay", true},
+      {"entryNodes", entryNodes},
       {"useChannels", true},
       {"hubMode", m_hub}};
   // Diagnostic override, merged over the default (top-level keys), no rebuild — the
