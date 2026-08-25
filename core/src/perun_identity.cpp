@@ -132,7 +132,7 @@ Identity deriveIdentity(const Bytes &secret) {
 
 std::string topicFor(const Identity &id, long epoch) {
   const Bytes t = hmacSha256(id.K, toBytes("perun/topic/v1|" + std::to_string(epoch)));
-  return "/logos/1/perun" + toHex(t, 16) + "/proto";
+  return "/perun/1/" + toHex(t, 16) + "/proto";
 }
 
 Bytes nonceFor(const Identity &id, const std::string &sealId) {
@@ -240,7 +240,7 @@ int main() {
   check("K", hex(id.K) == "919d0cbcc53ce111b35de42a62c0ff893f4dbf9757113fb95aeb5ed23dd828fb");
   check("Ke", hex(id.Ke) == "9a6571ef577ced03b33278dad61af17cc511051bb6e659238fe15b83b90be80d");
   const std::string topic = topicFor(id, 0);
-  check("topic", topic == "/logos/1/perun022cc77b54d0977f47f4a72039ea198b/proto");
+  check("topic", topic == "/perun/1/022cc77b54d0977f47f4a72039ea198b/proto");
   check("fingerprint", id.fpWords[0] == kPgpEven[150] && id.fpWords[1] == kPgpOdd[142] &&
                            id.fpWords[2] == kPgpEven[189]);
 

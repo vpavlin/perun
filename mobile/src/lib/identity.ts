@@ -69,7 +69,7 @@ export function deriveIdentity(secret: Uint8Array): Identity {
 /** The content topic for a given rotation epoch (default 0 = static, phase 1). */
 export function topicFor(id: Identity, epoch = 0): string {
   const t = hmac(sha256, id.K, enc(`perun/topic/v1|${epoch}`)).slice(0, 16);
-  return `/logos/1/perun${hex(t)}/proto`;
+  return `/perun/1/${hex(t)}/proto`;
 }
 
 /**
