@@ -19,6 +19,7 @@ import { sendAnnotation, syncRun } from "./runSync";
 import { ensureNode, onMessage, getDeviceId, deliveryAvailable, currentFingerprint } from "./delivery";
 import { loadIdentity } from "./identityStore";
 import { replicatePending, replicateBlob } from "./blob";
+import { catchupLadder, onSyncReq } from "./catchup";
 
 export type AnnotationKind = "text" | "photo" | "voice" | "delete" | "edit";
 
@@ -306,6 +307,7 @@ export async function syncRunFull(run: Run, onStatus?: (s: string) => void): Pro
   if (blobs.size) parts.push(`${media} media${mediaFail ? ` (${mediaFail} failed)` : ""}`);
   const bad = notesFail + mediaFail;
   onStatus?.(`${bad ? "Synced with issues" : "Synced ✓"} — ${parts.join(" · ")}${fp ? ` · ${fp}` : ""}`);
+  catchupLadder(); // also RBSR-reconcile so we pull anything peers have that we lack
 }
 
 /**
@@ -319,7 +321,11 @@ export async function startAnnotationReceive(): Promise<() => void> {
   if (!(await loadIdentity())) return () => {}; // unpaired: nothing to seal/open with
 
   const off = onMessage((env) => {
-    const e = env as { v?: unknown; type?: unknown; a?: unknown };
+    const e = env as { v?: unknown; type?: unknown; a?: unknown; msg?: unknown };
+    if (e.type === "SYNC_REQ") {
+      void onSyncReq(e.msg); // RBSR: serve what the peer lacks / pull what we lack
+      return;
+    }
     if (e.type !== "ANNOTATION" || !validAnnotation(e.a)) return;
     // Received from the wire ⇒ already synced.
     void insert(e.a, true);
@@ -329,6 +335,7 @@ export async function startAnnotationReceive(): Promise<() => void> {
     await ensureNode();
     void resendUnsynced();
     void replicatePending(); // push any on-device blobs the server doesn't have yet
+    catchupLadder();         // RBSR: reconcile the annotation log with peers (0/3/10/25s)
   } catch {
     /* node couldn't start — the listener stays registered for when it does */
   }
