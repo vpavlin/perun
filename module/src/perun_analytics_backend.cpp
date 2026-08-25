@@ -85,6 +85,8 @@ void PerunAnalyticsBackend::refresh() {
   setAnnotationsJson(QString::fromUtf8(
       QJsonDocument(o.value(QStringLiteral("annotations")).toObject())
           .toJson(QJsonDocument::Compact)));
+  setDiagJson(QString::fromUtf8(QJsonDocument(o.value(QStringLiteral("diag")).toObject())
+                                    .toJson(QJsonDocument::Compact)));
 }
 
 // ---- Commands: forward to perun_core, then refresh the mirrored state ----

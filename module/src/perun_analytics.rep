@@ -34,6 +34,12 @@ class PerunAnalytics
     // setBlobServer). The bearer token is never surfaced here.
     PROP(QString blobServer="" READONLY)
 
+    // Live transport diagnostics from perun_core (JSON): { peers, blePeers, wireRx,
+    // wireTx, rxFrames, lastRxAgoS, annEvents, topicHash, deviceId, hub, nodeReady }.
+    // Shown as a small panel so "connected but no sync" is diagnosable in-app: peers=0
+    // ⇒ not meshed; wireRx>0 but rxFrames=0 ⇒ arriving but not surfaced; etc.
+    PROP(QString diagJson="{}" READONLY)
+
     // URL of THIS instance's embedded blob server (the module doubles as the
     // household media hub — photos/voice captured on a phone upload here). Shown so
     // the user can set it as the phone's attachment URL. Empty if it can't listen or

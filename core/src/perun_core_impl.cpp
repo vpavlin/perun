@@ -376,6 +376,8 @@ void PerunCoreImpl::bootstrap() {
   modules().loam_core.onReceived(
       [this](const std::string &, const std::string &, const std::string &payloadB64, int64_t) {
         logEvent("rx frame from loam_core");
+        m_rxFrames++;
+        m_lastRxMs = nowMs();
         ingestSealed(QByteArray::fromStdString(payloadB64));
       });
 
@@ -933,6 +935,41 @@ std::string PerunCoreImpl::fingerprint() { return m_fingerprintStr.toStdString()
 std::string PerunCoreImpl::metricsJson() { return m_lastMetrics.toStdString(); }
 
 std::string PerunCoreImpl::snapshot() {
+  // Live transport diagnostics — so "connected but no sync" is visible in the UI.
+  const QJsonObject metrics =
+      QJsonDocument::fromJson(m_lastMetrics.toUtf8()).object();
+  long long peers = metrics.value(QStringLiteral("peers")).toInt(-1);
+  long long wireRx = 0, wireTx = 0, blePeers = 0;
+  for (const QJsonValue &bv : metrics.value(QStringLiteral("bearers")).toArray()) {
+    const QJsonObject b = bv.toObject();
+    const QString name = b.value(QStringLiteral("name")).toString();
+    if (name == QLatin1String("delivery")) {
+      wireRx = b.value(QStringLiteral("rx")).toInt();
+      wireTx = b.value(QStringLiteral("tx")).toInt();
+      if (peers < 0) peers = b.value(QStringLiteral("peers")).toInt(-1);
+    } else if (name == QLatin1String("ble")) {
+      blePeers = b.value(QStringLiteral("peers")).toInt();
+    }
+  }
+  const QJsonObject diag{
+      {"deviceId", m_deviceId},
+      {"hub", m_hub},
+      {"nodeReady", m_nodeReady},
+      {"peers", static_cast<double>(peers)},   // -1 = metrics not yet in
+      {"blePeers", static_cast<double>(blePeers)},
+      {"wireRx", static_cast<double>(wireRx)},  // frames the delivery node saw
+      {"wireTx", static_cast<double>(wireTx)},
+      {"rxFrames", static_cast<double>(m_rxFrames)}, // frames that reached perun_core
+      {"lastRxAgoS", m_lastRxMs > 0
+                         ? static_cast<double>((nowMs() - m_lastRxMs) / 1000)
+                         : -1.0},
+      {"annEvents", static_cast<double>(m_annRaw.size())},
+      {"topicHash", QString::fromLatin1(QCryptographicHash::hash(
+                        m_topic.toUtf8(), QCryptographicHash::Sha256)
+                        .toHex()
+                        .left(10))},
+  };
+
   QJsonObject out{
       {"status", m_status},
       {"ready", m_ready},
@@ -941,6 +978,7 @@ std::string PerunCoreImpl::snapshot() {
       {"runs", m_runs},
       {"blobServer", m_blobUrl},
       {"blobServerUrl", m_blobServerUrl},
+      {"diag", diag},
   };
   QJsonObject anns;
   for (auto it = m_annotations.constBegin(); it != m_annotations.constEnd(); ++it) {

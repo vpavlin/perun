@@ -333,6 +333,29 @@ Item {
             font.pixelSize: 11
         }
 
+        // ---- Live transport diagnostics ----
+        // Reads perun_core's snapshot().diag so "connected but no sync" is visible in-app.
+        // peers=0 (amber) ⇒ node isn't meshed on the fleet (usual culprit behind NAT);
+        // wireRx>0 but rxFrames=0 ⇒ frames arrive at the delivery node but don't surface
+        // to the app; lastRx ⇒ how long since anything actually landed.
+        LogosText {
+            id: diagLine
+            function d() { try { return JSON.parse(backend.diagJson || "{}"); } catch (e) { return {}; } }
+            visible: backend && backend.diagJson && backend.diagJson.length > 2
+            text: {
+                var x = d();
+                var lastRx = (x.lastRxAgoS === undefined || x.lastRxAgoS < 0) ? "never" : (x.lastRxAgoS + "s ago");
+                return "◈ peers " + (x.peers === undefined ? "?" : x.peers)
+                     + " · wireRx " + (x.wireRx || 0) + " → rxFrames " + (x.rxFrames || 0)
+                     + " · lastRx " + lastRx
+                     + " · anns " + (x.annEvents || 0)
+                     + " · shard " + (x.topicHash || "?")
+                     + (x.hub ? " · HUB" : "");
+            }
+            color: ((d().peers || 0) <= 0) ? Theme.palette.warning : Theme.palette.textTertiary
+            font.pixelSize: 10
+        }
+
         // ---- Master/detail, split HORIZONTALLY ----
         // Was stacked vertically: the list got a hardcoded 150px (≈2 rows) while
         // the summary tiles, map and splits fought over what was left. On a wide

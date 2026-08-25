@@ -176,6 +176,11 @@ private:
   // loam_core.metricsJson is async on the core proxy; the periodic poll caches
   // the latest here so the synchronous metricsJson()/hub heartbeat can read it.
   QString m_lastMetrics;
+  // Live diagnostics surfaced to the UI (snapshot().diag) so "connected but no sync"
+  // is visible at a glance: how many frames we've actually received + when.
+  long long m_rxFrames = 0;
+  long long m_lastRxMs = 0;
+  long long m_txSends = 0;
 
   // Chunk reassembly buffers, keyed by runId@rev.
   struct ChunkBuf {

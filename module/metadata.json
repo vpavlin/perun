@@ -1,11 +1,11 @@
 {
   "name": "perun_analytics",
   "display_name": "Perun Analytics",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "type": "ui_qml",
   "interface": "universal",
   "category": "fitness",
-  "description": "Detailed running analytics for Perun — the view over perun_core: splits, elevation, pace, trends, route map, journey annotations and replay.",
+  "description": "Detailed running analytics for Perun \u2014 the view over perun_core: splits, elevation, pace, trends, route map, journey annotations and replay.",
   "main": "perun_analytics_plugin",
   "icon": "qml/icons/icon.png",
   "view": "qml/Main.qml",
