@@ -9,6 +9,7 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
@@ -135,20 +136,22 @@ void PerunCoreImpl::loadOrCreateSecret() {
 }
 
 void PerunCoreImpl::openStoreAndLoad() {
-  // PERUN_CORE_DATA wins (the hub sets it, kym-style). Otherwise the Basecamp
-  // per-app AppDataLocation/perun — the SAME path the old ui_qml backend used, so
-  // an existing desktop keeps its runs.db + pair.key across the split.
+  // PERUN_CORE_DATA wins (the hub sets it, kym-style). Otherwise a STABLE,
+  // module-independent location ($XDG_DATA_HOME/perun) — NOT Basecamp's per-module
+  // AppDataLocation, which the core/view split moved and so lost the user's runs +
+  // pairing (vpavlin, 2026-08-25). Runs are local data and must survive updates.
   QString dir;
   if (qEnvironmentVariableIsSet("PERUN_CORE_DATA")) {
     dir = qEnvironmentVariable("PERUN_CORE_DATA");
   } else {
-    dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    dir = QString::fromLocal8Bit(qgetenv("XDG_DATA_HOME"));
     if (dir.isEmpty())
       dir = QDir::homePath() + QStringLiteral("/.local/share");
     dir += QStringLiteral("/perun");
   }
   m_dataDir = dir;
   QDir().mkpath(m_dataDir);
+  migrateLegacyDataIfEmpty(); // adopt an existing store if this one is empty
   logEvent("data dir = " + m_dataDir.toStdString());
 
   if (!m_store.open((m_dataDir + QStringLiteral("/runs.db")).toStdString())) {
@@ -183,6 +186,60 @@ void PerunCoreImpl::openStoreAndLoad() {
 
   loadAnnotations();
   loadBlobConfig();
+}
+
+// Recover the user's runs when this data dir is empty but a legacy perun store
+// exists elsewhere on disk (the old ui_qml module's AppDataLocation, a prior split,
+// a Basecamp per-module path). Copies runs.db + pair.key + blob config + sealed blobs
+// so runs AND the original pairing come back. Best-effort; runs once.
+void PerunCoreImpl::migrateLegacyDataIfEmpty() {
+  if (QFileInfo::exists(m_dataDir + QStringLiteral("/runs.db")))
+    return; // already have a store — never clobber it
+
+  QStringList roots;
+  const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  if (!appData.isEmpty())
+    roots << appData;
+  roots << QDir::homePath() + QStringLiteral("/.local/share");
+  roots << QDir::homePath() + QStringLiteral("/.config");
+
+  QString best;
+  qint64 bestSize = -1;
+  QSet<QString> seen;
+  for (const QString &root : roots) {
+    if (root.isEmpty() || seen.contains(root) || !QFileInfo::exists(root))
+      continue;
+    seen.insert(root);
+    QDirIterator it(root, QStringList{QStringLiteral("runs.db")}, QDir::Files,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+      const QString f = it.next();
+      const QString d = QFileInfo(f).absolutePath();
+      if (d == m_dataDir || !d.contains(QLatin1String("perun")))
+        continue; // only perun stores, and not ourselves
+      const qint64 sz = QFileInfo(f).size();
+      if (sz > bestSize) { bestSize = sz; best = d; }
+    }
+  }
+  if (best.isEmpty())
+    return;
+
+  logEvent("migrating legacy perun store from " + best.toStdString());
+  for (const QString &n : {QStringLiteral("runs.db"), QStringLiteral("pair.key"),
+                           QStringLiteral("blob.json")}) {
+    const QString src = best + QStringLiteral("/") + n;
+    if (QFileInfo::exists(src))
+      QFile::copy(src, m_dataDir + QStringLiteral("/") + n);
+  }
+  const QString sb = best + QStringLiteral("/blobs");
+  if (QFileInfo::exists(sb)) {
+    QDir().mkpath(m_dataDir + QStringLiteral("/blobs"));
+    QDirIterator bi(sb, QDir::Files);
+    while (bi.hasNext()) {
+      const QString f = bi.next();
+      QFile::copy(f, m_dataDir + QStringLiteral("/blobs/") + QFileInfo(f).fileName());
+    }
+  }
 }
 
 void PerunCoreImpl::loadBlobConfig() {

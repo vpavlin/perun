@@ -106,6 +106,10 @@ protected:
 private:
   void bootstrap();
   void openStoreAndLoad();
+  // If the (stable) data dir has no runs yet, adopt a legacy perun store found on
+  // disk (old ui_qml module's AppDataLocation etc.) so an update/split never loses
+  // the user's runs or their pairing. Runs are local data, independent of the key.
+  void migrateLegacyDataIfEmpty();
   void loadOrCreateSecret();
   void applyIdentity(const perun::Bytes &secret);
 
