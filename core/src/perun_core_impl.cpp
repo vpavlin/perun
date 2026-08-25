@@ -88,6 +88,7 @@ void PerunCoreImpl::onContextReady() {
                    : QStringLiteral("perun-desktop");
   logEvent(std::string("onContextReady — hub=") + (m_hub ? "1" : "0") +
            " device=" + m_deviceId.toStdString());
+  m_clock = std::make_unique<logos_sync::Clock>(m_deviceId.toStdString());
   openStoreAndLoad();
   loadOrCreateSecret();
   setStatusStr(QStringLiteral("Starting node…"));
@@ -269,6 +270,17 @@ void PerunCoreImpl::ingestSealed(const QByteArray &raw) {
       return;
     }
 
+    // RBSR catch-up control frame (fp/ids/need). Reconciles the annotation log.
+    if (etype == QLatin1String("SYNC_REQ")) {
+      const QJsonObject msgObj = env.value(QStringLiteral("msg")).toObject();
+      const std::string s =
+          QString::fromUtf8(QJsonDocument(msgObj).toJson(QJsonDocument::Compact)).toStdString();
+      nlohmann::json msg = nlohmann::json::parse(s, nullptr, false);
+      if (msg.is_object())
+        onSyncReq(msg);
+      return;
+    }
+
     if (etype != QLatin1String("CHUNK"))
       return;
 
@@ -319,6 +331,7 @@ void PerunCoreImpl::bootstrap() {
       logEvent("node ready; joined topic hash=" +
                QString::fromLatin1(QCryptographicHash::hash(m_topic.toUtf8(),
                    QCryptographicHash::Sha256).toHex().left(10)).toStdString());
+      catchupLadder(); // RBSR: reconcile the annotation log (mesh forms over ~10s)
       QTimer *mt = new QTimer();
       QObject::connect(mt, &QTimer::timeout, [this]() {
         modules().loam_core.metricsJsonAsync([this](std::string mj) {
@@ -487,6 +500,7 @@ bool PerunCoreImpl::applyAnnotation(const QJsonObject &a, bool persist) {
   const QString kind = a.value(QStringLiteral("kind")).toString();
   if (id.isEmpty() || runId.isEmpty())
     return false;
+  trackAnnEvent(a); // record the raw event for RBSR (all kinds incl edit/delete)
 
   auto doPersist = [&]() {
     if (!persist)
@@ -565,6 +579,94 @@ void PerunCoreImpl::publishAnnotations() {
   }
   const QString j = QString::fromUtf8(QJsonDocument(out).toJson(QJsonDocument::Compact));
   annotationsChanged(j.toStdString());
+}
+
+// ---- loam-sync RBSR catch-up ------------------------------------------------
+
+// Record one annotation as a raw logos_sync::Event for reconciliation (all kinds,
+// incl edit/delete — the raw log RBSR diffs; the fold above derives display state).
+void PerunCoreImpl::trackAnnEvent(const QJsonObject &a) {
+  const std::string id = a.value(QStringLiteral("id")).toString().toStdString();
+  if (id.empty())
+    return;
+  logos_sync::Event e;
+  e.id = id;
+  e.type = "ANNOTATION";
+  e.dev = a.value(QStringLiteral("author")).toString().toStdString();
+  double wall = a.value(QStringLiteral("createdAt")).toDouble();
+  if (wall <= 0) wall = a.value(QStringLiteral("t")).toDouble();
+  e.hlc.wall = static_cast<long long>(wall);
+  e.hlc.ctr = 0;
+  e.hlc.dev = e.dev;
+  e.payload = nlohmann::json::parse(
+      QJsonDocument(a).toJson(QJsonDocument::Compact).toStdString(), nullptr, false);
+  m_annRaw[id] = e;
+  if (m_clock)
+    m_clock->receive(e.hlc);
+}
+
+std::vector<logos_sync::Event> PerunCoreImpl::annEventsVec() const {
+  std::vector<logos_sync::Event> v;
+  v.reserve(m_annRaw.size());
+  for (const auto &kv : m_annRaw)
+    v.push_back(kv.second);
+  return v;
+}
+
+// Publish our annotation-log fingerprint (buildInitial) as a SYNC_REQ frame. A peer
+// (esp. the always-on hub) responds with the events we're missing. Ephemeral seal id
+// so requests aren't deduped by the deterministic-nonce store.
+void PerunCoreImpl::sendSyncReq() {
+  if (!m_nodeReady)
+    return;
+  nlohmann::json msg = logos_sync::catchup::buildInitial(annEventsVec(), m_deviceId.toStdString());
+  nlohmann::json env{{"v", 1}, {"type", "SYNC_REQ"}, {"msg", msg}};
+  const std::string sealId =
+      "sync|" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+  const QByteArray sealed = fromBytes(perun::seal(
+      m_id, sealId, toBytes(QByteArray::fromStdString(env.dump())), m_topic.toStdString()));
+  modules().loam_core.sendSealedAsync(m_topic.toStdString(), sealed.toBase64().toStdString(),
+                                      [](std::string) {});
+}
+
+// Respond to an incoming fp/ids/need: serve the annotations the peer lacks (over the
+// normal ANNOTATION wire, deterministic seal → dedups) + publish any range replies.
+void PerunCoreImpl::onSyncReq(const nlohmann::json &msg) {
+  const auto step = logos_sync::catchup::respond(annEventsVec(), msg, m_deviceId.toStdString());
+  for (const auto &e : step.serve) {
+    const QJsonObject a =
+        QJsonDocument::fromJson(QByteArray::fromStdString(e.payload.dump())).object();
+    const QJsonObject env{{"v", 1}, {"type", "ANNOTATION"}, {"a", a}};
+    const std::string sealId = "ann|" + e.id; // deterministic → idempotent redelivery
+    const QByteArray sealed = fromBytes(perun::seal(
+        m_id, sealId, toBytes(QJsonDocument(env).toJson(QJsonDocument::Compact)),
+        m_topic.toStdString()));
+    modules().loam_core.sendSealedAsync(m_topic.toStdString(), sealed.toBase64().toStdString(),
+                                        [](std::string) {});
+  }
+  for (const auto &r : step.replies) {
+    nlohmann::json env{{"v", 1}, {"type", "SYNC_REQ"}, {"msg", r}};
+    const std::string sealId =
+        "sync|" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+    const QByteArray sealed = fromBytes(perun::seal(
+        m_id, sealId, toBytes(QByteArray::fromStdString(env.dump())), m_topic.toStdString()));
+    modules().loam_core.sendSealedAsync(m_topic.toStdString(), sealed.toBase64().toStdString(),
+                                        [](std::string) {});
+  }
+  if (!step.serve.empty() || !step.replies.empty())
+    logEvent("catchup: served " + std::to_string(step.serve.size()) + " reply " +
+             std::to_string(step.replies.size()));
+}
+
+// Re-publish our fingerprint at 0/3/10/25s after Connected — the fleet mesh takes
+// ~10s to form, and a single early request is lost (scala's ladder, ADR 0004).
+void PerunCoreImpl::catchupLadder() {
+  sendSyncReq();
+  for (int ms : {3000, 10000, 25000})
+    QTimer::singleShot(ms, [this]() {
+      if (m_nodeReady)
+        sendSyncReq();
+    });
 }
 
 std::string PerunCoreImpl::configureBlobServer(std::string url, std::string token) {

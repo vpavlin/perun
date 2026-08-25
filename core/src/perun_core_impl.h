@@ -8,12 +8,17 @@
 #include <QString>
 #include <string>
 
+#include <map>
+#include <memory>
+
 #include "logos_module_context.h"
 
 #include "geo.h"
 #include "perun_identity.h"
 #include "run_analytics.h"
 #include "run_store.h"
+#include "logos_sync/event.hpp"    // Event, HLC, Clock, mergeEvents
+#include "logos_sync/catchup.hpp"  // RBSR buildInitial() / respond()
 
 class QNetworkAccessManager;
 class QTimer;
@@ -117,6 +122,17 @@ private:
   void applyEditToTarget(const QString &runId, const QString &target);
   void loadAnnotations();
 
+  // ---- loam-sync RBSR catch-up (docs/adr/0001; scala's pattern) ----
+  // Each annotation is a logos_sync::Event (id=a.id, hlc from createdAt, payload=a).
+  // We keep the annotation WIRE unchanged and add only a SYNC_REQ control frame that
+  // carries catchup fp/ids/need messages, so a cold / rejoined / restarted peer
+  // reconciles the annotation log by set-difference instead of relying on push.
+  void trackAnnEvent(const QJsonObject &a);        // add/refresh the raw event for RBSR
+  std::vector<logos_sync::Event> annEventsVec() const;
+  void sendSyncReq();                              // publish buildInitial() over the topic
+  void onSyncReq(const nlohmann::json &msg);       // respond(): serve + reply
+  void catchupLadder();                            // 0/3/10/25s re-publish after Connected
+
   // ---- Embedded media hub ----
   void startBlobServer();
   QString blobStoreDir() const;
@@ -168,6 +184,11 @@ private:
   QMap<QString, QMap<QString, QJsonObject>> m_annotations;
   QMap<QString, QSet<QString>> m_annDeleted;
   QMap<QString, QMap<QString, QJsonObject>> m_annEdits;
+
+  // RBSR: the RAW annotation event log (EVERY event incl edit/delete), keyed by id.
+  // Reconciled by set-difference; the fold above derives the display state from it.
+  std::map<std::string, logos_sync::Event> m_annRaw;
+  std::unique_ptr<logos_sync::Clock> m_clock; // HLC stamper, primed from m_annRaw
 
   // Media replication backend (empty = unconfigured). Token = upload-only.
   QString m_blobUrl;
