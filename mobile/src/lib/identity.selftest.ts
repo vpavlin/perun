@@ -28,7 +28,7 @@ check("K", hex(id.K) === "919d0cbcc53ce111b35de42a62c0ff893f4dbf9757113fb95aeb5e
 check("Ke", hex(id.Ke) === "9a6571ef577ced03b33278dad61af17cc511051bb6e659238fe15b83b90be80d", hex(id.Ke));
 
 const topic = topicFor(id, 0);
-check("topic", topic === "/perun/1/022cc77b54d0977f47f4a72039ea198b/proto", topic);
+check("topic", topic === "/logos/1/perun022cc77b54d0977f47f4a72039ea198b/proto", topic);
 
 check("fingerprint", JSON.stringify(id.fingerprint) === JSON.stringify([PGP_EVEN[150], PGP_ODD[142], PGP_EVEN[189]]),
   id.fingerprint.join(" "), [PGP_EVEN[150], PGP_ODD[142], PGP_EVEN[189]].join(" "));
