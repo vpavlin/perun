@@ -398,6 +398,70 @@ export function replayVideoHtml(): string {
       oc.getContext("2d").drawImage(im,0,0,oc.width,oc.height); return oc; }catch(e){ return im; }
   }
 
+  // --- WebM Duration injector -------------------------------------------------------------
+  // MediaRecorder emits a STREAMING WebM with NO Duration in Segment>Info, so header-reading
+  // players (Telegram, thumbnailers, ffprobe) see only ~the first cluster (~3s) and cut there,
+  // while decode-to-EOF players play it all. We parse the EBML just far enough to reach Info,
+  // then OVERWRITE an existing Duration float in place, or INSERT a Duration(0x4489) 8-byte
+  // float64 and grow only Info's own size vint — Segment's streamed/unknown size is left as-is
+  // (that's what the fix-webm-duration lib does and Telegram accepts it). TimecodeScale-aware
+  // (default 1e6 ns ⇒ Duration in ms). No deps, no transcode, no codec change. Returns a
+  // Promise<Blob>; any failure REJECTS and the caller sends the original blob unchanged.
+  function fixWebmDuration(blob, durationSeconds){
+    return new Promise(function(resolve,reject){
+      var fr=new FileReader();
+      fr.onerror=function(){ reject(); };
+      fr.onload=function(){ try{ resolve(patch(new Uint8Array(fr.result))); }catch(e){ reject(e); } };
+      try{ fr.readAsArrayBuffer(blob); }catch(e){ reject(e); }
+    });
+    function readId(b,pos){ var f=b[pos]; if(f===undefined) return null; var len=1,m=0x80;
+      while(len<=4 && !(f&m)){ m>>=1; len++; } if(len>4) return null;
+      var id=0,j; for(j=0;j<len;j++){ if(b[pos+j]===undefined) return null; id=id*256+b[pos+j]; }
+      return {id:id,len:len}; }
+    function readSize(b,pos){ var f=b[pos]; if(f===undefined) return null; var len=1,m=0x80;
+      while(len<=8 && !(f&m)){ m>>=1; len++; } if(len>8) return null;
+      var val=f&(m-1),un=(val===(m-1)),j; for(j=1;j<len;j++){ var nb=b[pos+j]; if(nb===undefined) return null; val=val*256+nb; if(nb!==0xFF) un=false; }
+      return {val:val,len:len,unknown:un}; }
+    function writeSize(val,len){ if(!len){ len=1; while(len<8 && val>=Math.pow(2,7*len)-1) len++; }
+      var out=new Uint8Array(len),v=val,j; for(j=len-1;j>=0;j--){ out[j]=v&0xFF; v=Math.floor(v/256); }
+      out[0]|=(0x80>>(len-1)); return out; }
+    function find(b,start,end,want){ var pos=start;
+      while(pos<end){ var id=readId(b,pos); if(!id) return null; var sp=pos+id.len, sz=readSize(b,sp); if(!sz) return null;
+        var dp=sp+sz.len, dl=sz.unknown?(end-dp):sz.val;
+        if(id.id===want) return {id:id.id,idPos:pos,sizePos:sp,sizeLen:sz.len,unknown:sz.unknown,dataPos:dp,dataLen:dl};
+        if(sz.unknown) return null; pos=dp+sz.val; }
+      return null; }
+    function patch(bytes){
+      var seg=find(bytes,0,bytes.length,0x18538067); if(!seg) throw "no segment";
+      var segEnd=seg.unknown?bytes.length:(seg.dataPos+seg.dataLen);
+      var info=find(bytes,seg.dataPos,segEnd,0x1549A966); if(!info) throw "no info";
+      var infoEnd=info.dataPos+info.dataLen, scale=1000000, q;
+      var tcs=find(bytes,info.dataPos,infoEnd,0x2AD7B1);
+      if(tcs){ var sv=0; for(q=0;q<tcs.dataLen;q++) sv=sv*256+bytes[tcs.dataPos+q]; if(sv>0) scale=sv; }
+      var value=durationSeconds*1e9/scale; if(!(value>0)) throw "bad duration";
+      var dur=find(bytes,info.dataPos,infoEnd,0x4489);
+      if(dur && (dur.dataLen===8 || dur.dataLen===4)){ // OVERWRITE in place — no size change
+        var o1=bytes.slice(), dv=new DataView(o1.buffer);
+        if(dur.dataLen===8) dv.setFloat64(dur.dataPos,value,false); else dv.setFloat32(dur.dataPos,value,false);
+        return new Blob([o1],{type:blob.type});
+      }
+      // INSERT Duration (44 89 88 <f64>) and grow ONLY Info's size vint.
+      var el=new Uint8Array(11); el[0]=0x44; el[1]=0x89; el[2]=0x88;
+      new DataView(el.buffer).setFloat64(3,value,false);
+      var newInfoLen=info.dataLen+11, newInfoSize=writeSize(newInfoLen);
+      var pre=bytes.slice(0,info.sizePos); // everything up to & incl. Info's id
+      if(!seg.unknown){ // known Segment size: bump it in place (same vint length) if it fits
+        var newSegVal=seg.dataLen+11+(newInfoSize.length-info.sizeLen);
+        if(newSegVal < Math.pow(2,7*seg.sizeLen)-1) pre.set(writeSize(newSegVal,seg.sizeLen), seg.sizePos);
+      }
+      var tail=bytes.slice(info.dataPos); // original Info data + all following (clusters etc.)
+      var out=new Uint8Array(pre.length+newInfoSize.length+el.length+tail.length), o=0;
+      out.set(pre,o); o+=pre.length; out.set(newInfoSize,o); o+=newInfoSize.length;
+      out.set(el,o); o+=el.length; out.set(tail,o);
+      return new Blob([out],{type:blob.type});
+    }
+  }
+
   // PREP: build the model, preload images, decode voice audio, build the schedule, draw a
   // still first frame, then post "prepared" (with the estimated length). Does NOT record —
   // the user picks ratio/pace first and taps Start (window.__start).
@@ -465,21 +529,27 @@ export function replayVideoHtml(): string {
     rec.onstop=function(){ if(aborted){ post({type:"cancelled"}); return; }
       var blob=new Blob(chunks,{type:mime});
       if(!blob.size){ post({type:"error",msg:"empty recording (the WebView produced no video)"}); return; }
-      var fr=new FileReader();
-      fr.onloadend=function(){
-        // Send the base64 in chunks — one giant postMessage gets truncated by the RN
-        // bridge (→ a corrupt, unplayable file). RN reassembles by index.
-        // Split at ";base64," NOT the first comma: with audio the mime is
-        // "video/webm;codecs=vp8,opus", so the first comma is INSIDE the codecs (that bug
-        // produced a real-size but corrupt, unplayable file).
-        var url=String(fr.result); var sep=url.indexOf(";base64,");
-        var b64=sep>=0?url.slice(sep+8):url.slice(url.indexOf(",")+1);
-        var CH=524288, total=Math.ceil(b64.length/CH), i;
-        post({type:"vstart",total:total,len:b64.length,bytes:blob.size});
-        for(i=0;i<total;i++){ post({type:"vchunk",i:i,data:b64.slice(i*CH,(i+1)*CH)}); }
-        post({type:"vend"});
-      };
-      fr.onerror=function(){ post({type:"error",msg:"read blob failed"}); }; fr.readAsDataURL(blob); };
+      // Inject the true Duration (== TOTAL == the posted prepared.durationS) into the WebM
+      // header so header-trusting players (Telegram) don't cut at ~3s. Never break generation
+      // over a metadata fix: on any failure, send the ORIGINAL blob.
+      fixWebmDuration(blob, TOTAL).then(sendBlob, function(){ sendBlob(blob); });
+      function sendBlob(b){ if(!b||!b.size) b=blob;
+        var fr=new FileReader();
+        fr.onloadend=function(){
+          // Send the base64 in chunks — one giant postMessage gets truncated by the RN
+          // bridge (→ a corrupt, unplayable file). RN reassembles by index.
+          // Split at ";base64," NOT the first comma: with audio the mime is
+          // "video/webm;codecs=vp8,opus", so the first comma is INSIDE the codecs (that bug
+          // produced a real-size but corrupt, unplayable file).
+          var url=String(fr.result); var sep=url.indexOf(";base64,");
+          var b64=sep>=0?url.slice(sep+8):url.slice(url.indexOf(",")+1);
+          var CH=524288, total=Math.ceil(b64.length/CH), i;
+          post({type:"vstart",total:total,len:b64.length,bytes:b.size});
+          for(i=0;i<total;i++){ post({type:"vchunk",i:i,data:b64.slice(i*CH,(i+1)*CH)}); }
+          post({type:"vend"});
+        };
+        fr.onerror=function(){ post({type:"error",msg:"read blob failed"}); }; fr.readAsDataURL(b);
+      } };
 
     var INTRO=0.9, DRAW=sched.time, HOLD=m.__hold||0, OUTRO=2.4, TOTAL=INTRO+DRAW+HOLD+OUTRO;
     var t0=null, lastP=-1, played={};
