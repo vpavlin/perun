@@ -50,6 +50,21 @@ export function replayVideoHtml(): string {
     var p=run.points, cum=[0], i;
     for(i=1;i<p.length;i++) cum[i]=cum[i-1]+hav(p[i-1],p[i]);
     var total=cum[cum.length-1];
+    // Recording GAPS (logging paused): a segment whose time delta is abnormally large AND
+    // that spans real distance (they kept moving). Threshold adapts to THIS ride's sampling
+    // rate so a dense ~1-3s track and a sparse one both work; a large distance jump with a
+    // large time gap is the clear signal. Flagged segments are bridged with a dashed, dimmed
+    // connector instead of a solid ridden line. Normal dense sampling is never flagged.
+    var GAP_MIN_MS=12000;        // >=12s between fixes reads as a pause, not sampling jitter
+    var GAP_MEDIAN_MULT=8;       // ...or >=8x this ride's own median fix interval
+    var GAP_MIN_DIST_M=25;       // ...and the endpoints are >=25m apart (they actually moved)
+    var dts=[]; for(i=1;i<p.length;i++){ var dtv=p[i].t-p[i-1].t; if(dtv>0) dts.push(dtv); }
+    var medDt=0; if(dts.length){ var sdt=dts.slice().sort(function(a,b){return a-b;}); medDt=sdt[sdt.length>>1]; }
+    var gapThresh=Math.max(GAP_MIN_MS, medDt*GAP_MEDIAN_MULT);
+    var gapSeg=new Array(p.length>1?p.length-1:0), gaps=[];
+    for(i=1;i<p.length;i++){ var gdt=p[i].t-p[i-1].t, gseg=cum[i]-cum[i-1];
+      var isGap=(gdt>gapThresh && gseg>=GAP_MIN_DIST_M);
+      gapSeg[i-1]=isGap; if(isGap) gaps.push({d0:cum[i-1],d1:cum[i]}); }
     var minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
     for(i=0;i<p.length;i++){var x=mercX(p[i].lon),y=mercY(p[i].lat);
       if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y;}
@@ -63,7 +78,7 @@ export function replayVideoHtml(): string {
     var minA=1e9,maxA=-1e9,gain=0;
     for(i=0;i<p.length;i++){var al=p[i].alt||0; if(al<minA)minA=al; if(al>maxA)maxA=al;
       if(i>0){var dd=(p[i].alt||0)-(p[i-1].alt||0); if(dd>0)gain+=dd;}}
-    return {p:p,cum:cum,total:total,proj:proj,annD:annD,minA:minA,maxA:maxA,gain:gain,W:W,H:H,U:Math.min(W,H),mscale:s,moffx:offx,moffy:offy,basemap:null,wmLogo:(run.opts&&run.opts.watermark?run.opts.watermark:""),wmImg:null,dur:run.points[p.length-1].t-run.points[0].t};
+    return {p:p,cum:cum,total:total,proj:proj,annD:annD,gapSeg:gapSeg,gaps:gaps,minA:minA,maxA:maxA,gain:gain,W:W,H:H,U:Math.min(W,H),mscale:s,moffx:offx,moffy:offy,basemap:null,wmLogo:(run.opts&&run.opts.watermark?run.opts.watermark:""),wmImg:null,dur:run.points[p.length-1].t-run.points[0].t};
   }
   function at(m,d){var p=m.p,cum=m.cum; d=Math.max(0,Math.min(m.total,d));
     var i=0; while(i<cum.length-1 && cum[i+1]<d) i++;
@@ -71,6 +86,9 @@ export function replayVideoHtml(): string {
     var seg=cum[Math.min(i+1,cum.length-1)]-cum[i], f=seg>0?(d-cum[i])/seg:0;
     function L(x,y){return x+(y-x)*f;}
     return {lat:L(a.lat,b.lat),lon:L(a.lon,b.lon),alt:L(a.alt,b.alt),t:L(a.t,b.t)};}
+  // Is distance d inside a bridged recording gap (the paused, dashed stretch)?
+  function inGap(m,d){ if(!m.gaps) return false;
+    for(var gi=0;gi<m.gaps.length;gi++){ if(d>m.gaps[gi].d0 && d<m.gaps[gi].d1) return true; } return false; }
 
   // Smooth speed curve → time-vs-distance table. The playhead cruises between annotations
   // and DECELERATES into / crawls through / ACCELERATES out of each (never stops), giving
@@ -88,11 +106,16 @@ export function replayVideoHtml(): string {
     for(j=0;j<infos.length;j++){ var inf=infos[j],sum=0;
       for(k=0;k<K;k++){ var dd=Math.abs((k+0.5)*step-inf.d); if(dd<inf.HW) sum+=0.5*(1+Math.cos(Math.PI*dd/inf.HW)); }
       inf.W=sum||1; }
+    // Distance inside a paused gap gets far less cruise time, so the dot SKIPS across the
+    // dashed bridge (a quick glide, never a slow "pretend we rode it") rather than eating
+    // seconds proportional to the jumped distance.
+    var GAP_TIME_FACTOR=0.18;
     var T=new Array(K+1); T[0]=0;
     for(k=0;k<K;k++){ var dmid=(k+0.5)*step, extra=0;
       for(j=0;j<infos.length;j++){ var f=infos[j],e=Math.abs(dmid-f.d);
         if(e<f.HW) extra+=f.R*(0.5*(1+Math.cos(Math.PI*e/f.HW))/f.W); }
-      T[k+1]=T[k]+travelS/K+extra; }
+      var base=travelS/K; if(inGap(m,dmid)) base*=GAP_TIME_FACTOR;
+      T[k+1]=T[k]+base+extra; }
     return {T:T,K:K,step:step,dist:total,time:T[K]};
   }
   function distAtTime(s,t){
@@ -144,16 +167,37 @@ export function replayVideoHtml(): string {
     }
     var seg=[]; for(i=0;i<m.p.length;i++) seg.push(m.proj(m.p[i]));
     c.lineJoin="round"; c.lineCap="round";
+    // Faint full-route underlay — solid on ridden stretches, broken across paused gaps...
     c.strokeStyle="rgba(224,147,47,0.14)"; c.lineWidth=U*0.006;
-    c.beginPath(); for(i=0;i<seg.length;i++){var pt=seg[i]; if(i)c.lineTo(pt[0],pt[1]);else c.moveTo(pt[0],pt[1]);} c.stroke();
+    c.beginPath(); var penU=false;
+    for(i=0;i<seg.length;i++){ if(i>0 && m.gapSeg[i-1]) penU=false; var pt=seg[i];
+      if(penU) c.lineTo(pt[0],pt[1]); else { c.moveTo(pt[0],pt[1]); penU=true; } }
+    c.stroke();
+    // ...which are bridged with a dimmed DASHED connector (reads as "paused here").
+    if(m.gaps.length){ c.save(); c.setLineDash([U*0.02,U*0.02]);
+      c.strokeStyle="rgba(224,147,47,0.10)"; c.lineWidth=U*0.005;
+      for(i=0;i<m.gapSeg.length;i++){ if(m.gapSeg[i]){ c.beginPath();
+        c.moveTo(seg[i][0],seg[i][1]); c.lineTo(seg[i+1][0],seg[i+1][1]); c.stroke(); } }
+      c.setLineDash([]); c.restore(); }
     var hp=m.proj(at(m,d));
+    // Progressed "already ridden" line — glowing solid on ridden stretches, kept BROKEN
+    // across any reached gap (the gap is redrawn dashed below, never as solid glow).
     c.save(); c.shadowColor=C.prim; c.shadowBlur=U*0.02;
     c.strokeStyle=C.prim; c.lineWidth=U*0.0075; c.beginPath();
-    var started=false;
-    for(i=0;i<m.p.length;i++){ if(m.cum[i]>d) break; var q=seg[i];
-      if(started)c.lineTo(q[0],q[1]); else {c.moveTo(q[0],q[1]);started=true;} }
-    if(started) c.lineTo(hp[0],hp[1]); else { c.moveTo(seg[0][0],seg[0][1]); }
+    var pen=false, si=-1;
+    for(i=0;i<m.p.length;i++){ if(m.cum[i]>d) break; si=i;
+      if(i>0 && m.gapSeg[i-1]) pen=false; var q=seg[i];
+      if(pen) c.lineTo(q[0],q[1]); else { c.moveTo(q[0],q[1]); pen=true; } }
+    // partial bit up to the dot — solid only when the current segment isn't a gap
+    if(si>=0 && si<m.p.length-1 && !m.gapSeg[si] && pen) c.lineTo(hp[0],hp[1]);
     c.stroke(); c.restore();
+    // ridden gap segments: dashed + dimmer than the solid glow (full, or partial to the dot)
+    if(m.gaps.length){ c.save(); c.setLineDash([U*0.02,U*0.02]);
+      c.strokeStyle="rgba(224,147,47,0.55)"; c.lineWidth=U*0.005;
+      for(i=0;i<m.gapSeg.length;i++){ if(!m.gapSeg[i] || m.cum[i]>=d) continue;
+        var gB=(m.cum[i+1]<=d)?seg[i+1]:hp;
+        c.beginPath(); c.moveTo(seg[i][0],seg[i][1]); c.lineTo(gB[0],gB[1]); c.stroke(); }
+      c.setLineDash([]); c.restore(); }
     c.fillStyle=C.ok; c.beginPath(); c.arc(seg[0][0],seg[0][1],U*0.009,0,7); c.fill();
     // Annotation markers on the route (like the overview map) — colour by kind, the one
     // you're passing is enlarged + glows.
@@ -165,6 +209,7 @@ export function replayVideoHtml(): string {
       c.lineWidth=U*0.0035; c.strokeStyle=C.bg; c.beginPath(); c.arc(mp[0],mp[1],r2,0,7); c.stroke();
       c.restore(); }
     c.save(); c.shadowColor=C.prim2; c.shadowBlur=U*0.035;
+    if(inGap(m,d)) c.globalAlpha=0.5; // dim the dot as it skips across the paused stretch
     c.fillStyle="rgba(224,147,47,0.28)"; c.beginPath(); c.arc(hp[0],hp[1],U*0.022,0,7); c.fill();
     c.fillStyle=C.prim2; c.beginPath(); c.arc(hp[0],hp[1],U*0.011,0,7); c.fill(); c.restore();
     // stat bar (top) — width anchored to W, sizes to U
