@@ -18,6 +18,7 @@ import { Run } from "../lib/types";
 import { Annotation, useAnnotations } from "../lib/annotations";
 import { localBlobUri, readFileBytes } from "../lib/blob";
 import { replayVideoHtml } from "../lib/replayVideoHtml";
+import { getVideoPhotoPrefs, setVideoPhotoPrefs } from "../lib/settings";
 import { theme } from "../theme";
 
 /** Persistent store for rendered clips (survives, re-shareable) — filename encodes the run,
@@ -103,7 +104,7 @@ const BASEMAPS: { key: string; label: string }[] = [
 ];
 
 /** Build the JSON the WebView renderer consumes. */
-async function buildPayload(run: Run, annotations: Annotation[], dims: { w: number; h: number }, pace: number, basemap: string, watermark: string) {
+async function buildPayload(run: Run, annotations: Annotation[], dims: { w: number; h: number }, pace: number, basemap: string, watermark: string, photoMode: "card" | "hero", cardSize: number) {
   const points = run.track.points.map((p) => ({ lat: p.lat, lon: p.lon, alt: p.alt ?? 0, t: p.t }));
   const anns = [];
   for (const a of annotations) {
@@ -132,7 +133,8 @@ async function buildPayload(run: Run, annotations: Annotation[], dims: { w: numb
     // travelS = cruise time across the whole route (pace scales it). The playhead
     // decelerates into / crawls through / accelerates out of each annotation (readS, or a
     // voice note's length) — a smooth slow-through, not a hard stop.
-    opts: { travelS: BASE_TRAVEL / pace, readS: 3, width: dims.w, height: dims.h, bitrate, basemap, watermark },
+    // photoMode: "card" (corner card, sized by cardSize 0..1) or "hero" (full-frame moment).
+    opts: { travelS: BASE_TRAVEL / pace, readS: 3, width: dims.w, height: dims.h, bitrate, basemap, watermark, photoMode, cardSize },
   };
 }
 
@@ -156,6 +158,17 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   const [logoUri, setLogoUri] = useState("");
   useEffect(() => { perunLogoDataUri().then(setLogoUri); }, []);
   const watermark = wmOn ? logoUri : "";
+  // Annotation-photo presentation: mode + (card-only) size. Committed values trigger a
+  // re-prep; the "live" size updates only the thumb/label while dragging. Persisted so the
+  // screen re-opens on the last choice.
+  const [photoMode, setPhotoMode] = useState<"card" | "hero">("card");
+  const [cardSize, setCardSize] = useState(0.5);     // committed (re-prep)
+  const [cardSizeLive, setCardSizeLive] = useState(0.5);
+  useEffect(() => {
+    getVideoPhotoPrefs().then((p) => { setPhotoMode(p.photoMode); setCardSize(p.cardSize); setCardSizeLive(p.cardSize); });
+  }, []);
+  const commitMode = (mo: "card" | "hero") => { setPhotoMode(mo); void setVideoPhotoPrefs({ photoMode: mo, cardSize }); };
+  const commitSize = (v: number) => { setCardSizeLive(v); setCardSize(v); void setVideoPhotoPrefs({ photoMode, cardSize: v }); };
   const runSafe = run.name.replace(/[^a-z0-9]+/gi, "-").slice(0, 40) || "run";
   const [saved, setSaved] = useState<Saved[]>([]);
   const refreshSaved = () => setSaved(listSaved(runSafe));
@@ -169,12 +182,12 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     payloadRef.current = null;
     setPhase("prep"); setProgress(0); setErr("");
     setEst(estimateDuration(annotations, pace));
-    buildPayload(run, annotations, { w: ratio.w, h: ratio.h }, pace, basemap, watermark).then((p) => {
+    buildPayload(run, annotations, { w: ratio.w, h: ratio.h }, pace, basemap, watermark, photoMode, cardSize).then((p) => {
       if (alive) payloadRef.current = JSON.stringify(p);
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, run.id, ratioKey, pace, basemap, watermark]);
+  }, [visible, run.id, ratioKey, pace, basemap, watermark, photoMode, cardSize]);
 
   const shareWebm = async (b64: string) => {
     setPhase("saving");
@@ -344,12 +357,39 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
           </Pressable>
         </View>
 
+        {/* Annotation-photo presentation — Hero moment (full-frame) vs Card (corner). */}
+        <View style={styles.baseRow}>
+          {(["hero", "card"] as const).map((mo) => {
+            const on = mo === photoMode;
+            return (
+              <Pressable
+                key={mo}
+                style={[styles.baseChip, on && styles.ratioChipOn, busy && styles.ratioDisabled]}
+                disabled={busy}
+                onPress={() => commitMode(mo)}
+              >
+                <Text style={[styles.baseLabel, on && styles.ratioLabelOn]}>{mo === "hero" ? "◆ Hero moment" : "▢ Card"}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* Card photo size — only in Card mode (Hero fills the frame on its own). */}
+        {photoMode === "card" && (
+          <View style={styles.paceRow}>
+            <Text style={styles.paceCap}>Small</Text>
+            <MiniSlider value={cardSizeLive} min={0} max={1} disabled={busy} onLive={setCardSizeLive} onCommit={commitSize} />
+            <Text style={styles.paceCap}>Large</Text>
+            <Text style={styles.paceEst}>{Math.round((0.5 + 0.22 * cardSizeLive) * 100)}%</Text>
+          </View>
+        )}
+
         {/* WebView renders the animation live (visible so rAF isn't throttled) and records
             it — preview + encoder in one. key=ratio remounts it for a fresh render. */}
         <View style={[styles.stage, { width: sw, height: sh }]}>
           {visible && (
             <WebView
-              key={`${ratioKey}-${pace.toFixed(2)}-${basemap}-${wmOn ? "wm" : "no"}`}
+              key={`${ratioKey}-${pace.toFixed(2)}-${basemap}-${wmOn ? "wm" : "no"}-${photoMode}-${cardSize.toFixed(2)}`}
               ref={webRef}
               source={{ html: replayVideoHtml() }}
               originWhitelist={["*"]}
@@ -366,8 +406,10 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
         {/* Pace / length — slide to control how long the clip is (live estimate). */}
         <View style={styles.paceRow}>
           <Text style={styles.paceCap}>Longer</Text>
-          <PaceSlider
+          <MiniSlider
             value={paceLive}
+            min={PACE.min}
+            max={PACE.max}
             disabled={busy}
             onLive={setPaceLive}
             onCommit={(v) => { setPaceLive(v); setPace(v); }}
@@ -427,15 +469,15 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   );
 }
 
-/** A minimal pace slider (no native dep). Reports live value while dragging, commits on
- *  release (which triggers a re-prep). Left = longer clip, right = shorter. */
-function PaceSlider({ value, onLive, onCommit, disabled }: {
-  value: number; onLive: (v: number) => void; onCommit: (v: number) => void; disabled?: boolean;
+/** A minimal slider (no native dep) over [min,max]. Reports the live value while dragging,
+ *  commits on release (which triggers a re-prep). Used for both pace and card-photo size. */
+function MiniSlider({ value, min, max, onLive, onCommit, disabled }: {
+  value: number; min: number; max: number; onLive: (v: number) => void; onCommit: (v: number) => void; disabled?: boolean;
 }) {
   const wRef = useRef(1);
   const toVal = (x: number) => {
     const t = Math.max(0, Math.min(1, x / Math.max(1, wRef.current)));
-    return PACE.min + t * (PACE.max - PACE.min);
+    return min + t * (max - min);
   };
   const pan = useRef(
     PanResponder.create({
@@ -446,7 +488,7 @@ function PaceSlider({ value, onLive, onCommit, disabled }: {
       onPanResponderRelease: (e) => onCommit(toVal(e.nativeEvent.locationX)),
     })
   ).current;
-  const t = (value - PACE.min) / (PACE.max - PACE.min);
+  const t = (value - min) / (max - min);
   return (
     <View
       style={[styles.sliderTrack, disabled && styles.ratioDisabled]}

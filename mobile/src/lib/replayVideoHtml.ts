@@ -78,7 +78,9 @@ export function replayVideoHtml(): string {
     var minA=1e9,maxA=-1e9,gain=0;
     for(i=0;i<p.length;i++){var al=p[i].alt||0; if(al<minA)minA=al; if(al>maxA)maxA=al;
       if(i>0){var dd=(p[i].alt||0)-(p[i-1].alt||0); if(dd>0)gain+=dd;}}
-    return {p:p,cum:cum,total:total,proj:proj,annD:annD,gapSeg:gapSeg,gaps:gaps,minA:minA,maxA:maxA,gain:gain,W:W,H:H,U:Math.min(W,H),mscale:s,moffx:offx,moffy:offy,basemap:null,wmLogo:(run.opts&&run.opts.watermark?run.opts.watermark:""),wmImg:null,dur:run.points[p.length-1].t-run.points[0].t};
+    var O=run.opts||{};
+    return {p:p,cum:cum,total:total,proj:proj,annD:annD,gapSeg:gapSeg,gaps:gaps,minA:minA,maxA:maxA,gain:gain,W:W,H:H,U:Math.min(W,H),mscale:s,moffx:offx,moffy:offy,basemap:null,wmLogo:(O.watermark?O.watermark:""),wmImg:null,dur:run.points[p.length-1].t-run.points[0].t,
+      pmode:(O.photoMode==="hero"?"hero":"card"), csize:(O.cardSize!=null?Math.max(0,Math.min(1,O.cardSize)):0.5)};
   }
   function at(m,d){var p=m.p,cum=m.cum; d=Math.max(0,Math.min(m.total,d));
     var i=0; while(i<cum.length-1 && cum[i+1]<d) i++;
@@ -227,16 +229,27 @@ export function replayVideoHtml(): string {
     var feat=null,bg=1e18; for(i=0;i<m.annD.length;i++){var g=Math.abs(m.annD[i].dist-d); if(g<bg){bg=g;feat=m.annD[i];}}
     if(feat){ var near=bg<=Math.max(60,m.total*0.03);
       var fade=Math.max(0,Math.min(1,1-(bg)/Math.max(80,m.total*0.05)));
-      var box=cardBox(m,feat,imgs), cw=box.w, ch=box.h, mgx=U*0.045;
-      if(!m.__sh) m.__sh=(hp[0]<W*0.5)?"R":"L";            // dot right → card left, and vice-versa
-      if(hp[0]>W*0.58) m.__sh="L"; else if(hp[0]<W*0.42) m.__sh="R";
-      if(!m.__sv) m.__sv=(hp[1]<H*0.5)?"B":"T";            // dot top → card bottom, and vice-versa
-      if(hp[1]<H*0.42) m.__sv="B"; else if(hp[1]>H*0.58) m.__sv="T";
-      var topY=U*0.19, botY=Math.max(topY, H-U*0.235-ch);  // between the stat bar and elev strip
-      var tx=m.__sh==="L"?mgx:(W-cw-mgx), ty=m.__sv==="T"?topY:botY;
-      if(m.__cx==null){ m.__cx=tx; m.__cy=ty; }            // no glide on the first frame
-      else { var E=0.12; m.__cx+=(tx-m.__cx)*E; m.__cy+=(ty-m.__cy)*E; }
-      card(c,m,feat,near,0.35+0.65*fade,imgs,featuredDraws(m,feat,imgs,tNow),{x:m.__cx,y:m.__cy}); }
+      var fdraws=featuredDraws(m,feat,imgs,tNow);
+      if(m.pmode==="hero" && feat.kind==="photo"){
+        // HERO: the photo blows up to fill the frame while the dot dwells on it, then shrinks
+        // back. Grows in / shrinks out on the same ~0.3s ease as the crossfade. The corner
+        // card is suppressed for photos here — the hero IS the presentation.
+        var htarget=near?1:0;
+        if(tNow==null || m.__hs==null) m.__hs=htarget; else m.__hs+=(htarget-m.__hs)*0.22;
+        drawHero(c,m,feat,fdraws,m.__hs);
+      } else {
+        if(tNow!=null && m.__hs!=null) m.__hs+=(0-m.__hs)*0.22; // settle any hero out (non-photo/card)
+        var box=cardBox(m,feat,imgs), cw=box.w, ch=box.h, mgx=U*0.045;
+        if(!m.__sh) m.__sh=(hp[0]<W*0.5)?"R":"L";            // dot right → card left, and vice-versa
+        if(hp[0]>W*0.58) m.__sh="L"; else if(hp[0]<W*0.42) m.__sh="R";
+        if(!m.__sv) m.__sv=(hp[1]<H*0.5)?"B":"T";            // dot top → card bottom, and vice-versa
+        if(hp[1]<H*0.42) m.__sv="B"; else if(hp[1]>H*0.58) m.__sv="T";
+        var topY=U*0.19, botY=Math.max(topY, H-U*0.235-ch);  // between the stat bar and elev strip
+        var tx=m.__sh==="L"?mgx:(W-cw-mgx), ty=m.__sv==="T"?topY:botY;
+        if(m.__cx==null){ m.__cx=tx; m.__cy=ty; }            // no glide on the first frame
+        else { var E=0.12; m.__cx+=(tx-m.__cx)*E; m.__cy+=(ty-m.__cy)*E; }
+        card(c,m,feat,near,0.35+0.65*fade,imgs,fdraws,{x:m.__cx,y:m.__cy});
+      } }
     // watermark (just above the elevation strip) + vignette
     // Optional Perun-logo watermark (bottom-left) + run name. Off = nothing (clean video).
     var wy=H-U*0.225;
@@ -281,24 +294,29 @@ export function replayVideoHtml(): string {
     out.push({g:curG,a:k});                             // incoming photo dissolves in
     return out;
   }
+  // Card width + image-height cap, driven by the user's size slider (m.csize 0..1). At
+  // size 0 these equal the old fixed values (min(W*0.5,U*0.62), U*0.40) — "small ≈ today";
+  // at size 1 the card grows toward W*0.72/U*0.86 wide with the image cap up to U*0.66.
+  function cardCaps(m){ var sz=(m.csize==null?0.5:Math.max(0,Math.min(1,m.csize)));
+    return { w:Math.min(m.W*(0.50+0.22*sz), m.U*(0.62+0.24*sz)), h:m.U*(0.40+0.26*sz) }; }
   // Card outer size (w,h) for the given annotation — used to place it before drawing.
   // MUST mirror the w/h computed inside card().
   function cardBox(m,a,imgs){
-    var W=m.W,U=m.U,pad=U*0.022;
+    var U=m.U,pad=U*0.022, caps=cardCaps(m);
     var im=featuredImg(a,imgs);
-    var w=Math.min(W*0.5,U*0.62), headH=U*0.066, iw=w-2*pad;
-    var ih=im?Math.min(U*0.40, iw/(im.width/im.height)):0;
+    var w=caps.w, headH=U*0.066, iw=w-2*pad;
+    var ih=im?Math.min(caps.h, iw/(im.width/im.height)):0;
     var h=headH+(im?ih+pad*0.6:0)+(a.text?U*0.10:0)+pad*0.6;
     return {w:w,h:h};
   }
   function card(c,m,a,near,alpha,imgs,draws,pos){
-    var W=m.W,U=m.U,pad=U*0.022;
+    var W=m.W,U=m.U,pad=U*0.022, caps=cardCaps(m);
     var im=featuredImg(a,imgs);
-    var w=Math.min(W*0.5,U*0.62), x=pos?pos.x:(W-w-U*0.045), y=pos?pos.y:U*0.20, headH=U*0.066;
+    var w=caps.w, x=pos?pos.x:(W-w-U*0.045), y=pos?pos.y:U*0.20, headH=U*0.066;
     var iw=w-2*pad, ix=x+pad, iy=y+headH;
     // Image region height WRAPS the contain-fitted image: landscape → short, portrait →
     // taller (capped), so a portrait shows the whole person instead of a cropped mid-band.
-    var ih=im?Math.min(U*0.40, iw/(im.width/im.height)):0;
+    var ih=im?Math.min(caps.h, iw/(im.width/im.height)):0;
     var hasText=!!a.text;
     // Card sizes to content: header + image (if any) + caption block ONLY when a caption
     // exists — an uncaptioned photo has no empty text band under it.
@@ -321,6 +339,28 @@ export function replayVideoHtml(): string {
     }
     if(hasText){c.fillStyle=C.text;c.font="500 "+(U*0.026)+"px "+C.sans;
       wrap(c,a.text,x+pad,iy+(im?ih+U*0.03:U*0.028),w-2*pad,U*0.034);}
+  }
+  // HERO presentation — the featured photo blown up to fill most of the frame over a DIMMED
+  // (never fully hidden) map. s in 0..1 drives the pop: scale 0.72→1 and opacity. Reuses the
+  // crossfade draw list so consecutive heroes cross-dissolve. Caption (if any) sits under it.
+  function drawHero(c,m,feat,draws,s){
+    if(!(s>0.001)||!draws||!draws.length) return;
+    var W=m.W,H=m.H,U=m.U;
+    c.save();
+    c.fillStyle="rgba(4,6,8,"+(0.62*s)+")"; c.fillRect(0,0,W,H); // dim the map behind the photo
+    var HW=W*0.88, HH=H*0.60, cx=W/2, cy=H*0.47, sc=0.72+0.28*s, di;
+    for(di=0;di<draws.length;di++){ var it=draws[di]; if(!it.g||it.a<=0) continue;
+      var ar=it.g.width/it.g.height, bw, bh;                 // CONTAIN-fit inside the hero box
+      if(HW/HH>ar){ bh=HH; bw=HH*ar; } else { bw=HW; bh=HW/ar; }
+      bw*=sc; bh*=sc; var rx=cx-bw/2, ry=cy-bh/2, aa=Math.max(0,Math.min(1,it.a))*s;
+      c.globalAlpha=aa; rr(c,rx,ry,bw,bh,U*0.02); c.save(); c.clip();
+      c.drawImage(it.g,rx,ry,bw,bh); c.restore();
+      c.globalAlpha=aa; c.lineWidth=U*0.004; c.strokeStyle="rgba(255,255,255,0.16)";
+      rr(c,rx,ry,bw,bh,U*0.02); c.stroke();
+    }
+    if(feat.text){ c.globalAlpha=s; c.textAlign="center"; c.fillStyle=C.text;
+      c.font="600 "+(U*0.032)+"px "+C.sans; c.fillText(feat.text, cx, cy+HH*sc*0.5+U*0.055); c.textAlign="left"; }
+    c.globalAlpha=1; c.restore();
   }
   function wrap(c,text,x,y,maxw,lh){var words=String(text).split(" "),line="",yy=y,i;
     for(i=0;i<words.length;i++){var t=line?line+" "+words[i]:words[i];
@@ -410,6 +450,7 @@ export function replayVideoHtml(): string {
     var m=ctx.m,opts=ctx.opts,audio=ctx.audio,imgs=ctx.imgs,sched=ctx.sched,i;
     m.__fi=null; // fresh image-crossfade state per render (fade the first photo in)
     m.__cx=null; m.__cy=null; m.__sh=null; m.__sv=null; // fresh card-position glide per render
+    m.__hs=null; // fresh hero grow/shrink state per render
     var tracks=cv.captureStream(30).getVideoTracks();
     var withAudio=!!(audio&&audio.dest);
     if(withAudio){ try{ if(audio.ctx.resume)audio.ctx.resume(); tracks=tracks.concat(audio.dest.stream.getAudioTracks()); }catch(e){ withAudio=false; } }
