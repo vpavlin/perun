@@ -59,7 +59,7 @@ export function replayVideoHtml(): string {
     function proj(q){return [mercX(q.lon)*s+offx, mercY(q.lat)*s+offy];}
     var annD=run.annotations.map(function(a,idx){var bi=0,bd=1e18,j;
       for(j=0;j<p.length;j++){var g=Math.abs(p[j].t-a.t); if(g<bd){bd=g;bi=j;}}
-      return {idx:idx,kind:a.kind,text:a.text,img:a.img,audio:a.audio,dur:a.dur,dist:cum[bi]};});
+      return {idx:idx,kind:a.kind,text:a.text,img:a.img,audio:a.audio,dur:a.dur,dist:cum[bi],t:p[bi].t};});
     var minA=1e9,maxA=-1e9,gain=0;
     for(i=0;i<p.length;i++){var al=p[i].alt||0; if(al<minA)minA=al; if(al>maxA)maxA=al;
       if(i>0){var dd=(p[i].alt||0)-(p[i-1].alt||0); if(dd>0)gain+=dd;}}
@@ -176,11 +176,22 @@ export function replayVideoHtml(): string {
     stat(c,W*0.925,sb,"ELEV",Math.round(head.alt)+" m","r",U);
     // elevation strip (bottom)
     elev(c,m,d,W*0.04,H-U*0.20,W*0.92,U*0.14);
-    // featured annotation card (right)
+    // Featured annotation card — repositions to the region OPPOSITE the moving dot so it
+    // never sits on the playhead / point of interest. Hysteresis picks the side (a deadband
+    // around centre stops edge-flicker) and the card EASES toward the target so it glides.
     var feat=null,bg=1e18; for(i=0;i<m.annD.length;i++){var g=Math.abs(m.annD[i].dist-d); if(g<bg){bg=g;feat=m.annD[i];}}
     if(feat){ var near=bg<=Math.max(60,m.total*0.03);
       var fade=Math.max(0,Math.min(1,1-(bg)/Math.max(80,m.total*0.05)));
-      card(c,m,feat,near,0.35+0.65*fade,imgs,featuredDraws(m,feat,imgs,tNow)); }
+      var box=cardBox(m,feat,imgs), cw=box.w, ch=box.h, mgx=U*0.045;
+      if(!m.__sh) m.__sh=(hp[0]<W*0.5)?"R":"L";            // dot right → card left, and vice-versa
+      if(hp[0]>W*0.58) m.__sh="L"; else if(hp[0]<W*0.42) m.__sh="R";
+      if(!m.__sv) m.__sv=(hp[1]<H*0.5)?"B":"T";            // dot top → card bottom, and vice-versa
+      if(hp[1]<H*0.42) m.__sv="B"; else if(hp[1]>H*0.58) m.__sv="T";
+      var topY=U*0.19, botY=Math.max(topY, H-U*0.235-ch);  // between the stat bar and elev strip
+      var tx=m.__sh==="L"?mgx:(W-cw-mgx), ty=m.__sv==="T"?topY:botY;
+      if(m.__cx==null){ m.__cx=tx; m.__cy=ty; }            // no glide on the first frame
+      else { var E=0.12; m.__cx+=(tx-m.__cx)*E; m.__cy+=(ty-m.__cy)*E; }
+      card(c,m,feat,near,0.35+0.65*fade,imgs,featuredDraws(m,feat,imgs,tNow),{x:m.__cx,y:m.__cy}); }
     // watermark (just above the elevation strip) + vignette
     // Optional Perun-logo watermark (bottom-left) + run name. Off = nothing (clean video).
     var wy=H-U*0.225;
@@ -225,10 +236,20 @@ export function replayVideoHtml(): string {
     out.push({g:curG,a:k});                             // incoming photo dissolves in
     return out;
   }
-  function card(c,m,a,near,alpha,imgs,draws){
+  // Card outer size (w,h) for the given annotation — used to place it before drawing.
+  // MUST mirror the w/h computed inside card().
+  function cardBox(m,a,imgs){
     var W=m.W,U=m.U,pad=U*0.022;
     var im=featuredImg(a,imgs);
-    var w=Math.min(W*0.5,U*0.62), x=W-w-U*0.045, y=U*0.20, headH=U*0.066;
+    var w=Math.min(W*0.5,U*0.62), headH=U*0.066, iw=w-2*pad;
+    var ih=im?Math.min(U*0.40, iw/(im.width/im.height)):0;
+    var h=headH+(im?ih+pad*0.6:0)+(a.text?U*0.10:0)+pad*0.6;
+    return {w:w,h:h};
+  }
+  function card(c,m,a,near,alpha,imgs,draws,pos){
+    var W=m.W,U=m.U,pad=U*0.022;
+    var im=featuredImg(a,imgs);
+    var w=Math.min(W*0.5,U*0.62), x=pos?pos.x:(W-w-U*0.045), y=pos?pos.y:U*0.20, headH=U*0.066;
     var iw=w-2*pad, ix=x+pad, iy=y+headH;
     // Image region height WRAPS the contain-fitted image: landscape → short, portrait →
     // taller (capped), so a portrait shows the whole person instead of a cropped mid-band.
@@ -323,8 +344,16 @@ export function replayVideoHtml(): string {
     if(RUN.opts.basemap && RUN.opts.basemap!=="none"){
       pend.push(loadBasemap(m,RUN.opts.basemap).then(function(bm){ m.basemap=bm; },function(){})); }
     var sched=buildSchedule(m,RUN.opts);
+    // A photo taken right at the finish maps to the last point, so the schedule's slow-zone
+    // is truncated and it only flashes. If a photo falls within the last ~2s of the track,
+    // hold the final frame afterwards so that last photo gets a real dwell. (Uses ad.img so
+    // it triggers regardless of image load state, which is still pending here.)
+    var endT=m.p[m.p.length-1].t, HOLD_S=2.0, TAIL_MS=2000, late=false;
+    for(var ii=0;ii<m.annD.length;ii++){ var ad=m.annD[ii];
+      if(ad.kind==="photo" && ad.img && (endT-ad.t)>=0 && (endT-ad.t)<=TAIL_MS){ late=true; break; } }
+    m.__hold=late?HOLD_S:0;
     window.__ctx={m:m,opts:RUN.opts,audio:audio,imgs:imgs,sched:sched};
-    var est=0.9+sched.time+2.4;
+    var est=0.9+sched.time+m.__hold+2.4;
     Promise.all(pend).then(finish,finish);
     function finish(){ try{ drawScene(m,0,imgs); }catch(e){} post({type:"prepared",durationS:est}); }
   }
@@ -335,6 +364,7 @@ export function replayVideoHtml(): string {
   function record(ctx){
     var m=ctx.m,opts=ctx.opts,audio=ctx.audio,imgs=ctx.imgs,sched=ctx.sched,i;
     m.__fi=null; // fresh image-crossfade state per render (fade the first photo in)
+    m.__cx=null; m.__cy=null; m.__sh=null; m.__sv=null; // fresh card-position glide per render
     var tracks=cv.captureStream(30).getVideoTracks();
     var withAudio=!!(audio&&audio.dest);
     if(withAudio){ try{ if(audio.ctx.resume)audio.ctx.resume(); tracks=tracks.concat(audio.dest.stream.getAudioTracks()); }catch(e){ withAudio=false; } }
@@ -365,7 +395,7 @@ export function replayVideoHtml(): string {
       };
       fr.onerror=function(){ post({type:"error",msg:"read blob failed"}); }; fr.readAsDataURL(blob); };
 
-    var INTRO=0.9, DRAW=sched.time, OUTRO=2.4, TOTAL=INTRO+DRAW+OUTRO;
+    var INTRO=0.9, DRAW=sched.time, HOLD=m.__hold||0, OUTRO=2.4, TOTAL=INTRO+DRAW+HOLD+OUTRO;
     var t0=null, lastP=-1, played={};
     function post0(p){ p=Math.max(0,Math.min(1,p)); if(p-lastP>=0.02){lastP=p; post({type:"progress",p:p});} }
     // Timeslice: some Android WebViews emit a single MALFORMED blob with a plain start();
@@ -382,7 +412,8 @@ export function replayVideoHtml(): string {
             try{ var src=audio.ctx.createBufferSource(); src.buffer=audio.buffers[a.dist];
               src.connect(audio.dest); src.connect(audio.ctx.destination); src.start(); }catch(e){}
             played[a.dist]=true; } } } }
-      else if(el<TOTAL){ var v=(el-INTRO-DRAW)/OUTRO; outroCard(m, Math.min(1,v/0.5)); }
+      else if(el<INTRO+DRAW+HOLD){ drawScene(m,m.total,imgs,el-INTRO); } // dwell on the final (late) photo; tNow keeps its crossfade finishing
+      else if(el<TOTAL){ var v=(el-INTRO-DRAW-HOLD)/OUTRO; outroCard(m, Math.min(1,v/0.5)); }
       else { drawScene(m,m.total,imgs); try{rec.stop();}catch(e){} return; }
       requestAnimationFrame(frame);
     }
