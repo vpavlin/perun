@@ -20,8 +20,6 @@ import { localBlobUri, readFileBytes } from "../lib/blob";
 import { replayVideoHtml } from "../lib/replayVideoHtml";
 import { theme } from "../theme";
 
-const MAX_PHOTOS = 6; // bound the embedded payload + canvas work
-
 /** Persistent store for rendered clips (survives, re-shareable) — filename encodes the run,
  *  ratio and a timestamp, so nothing is overwritten. */
 function videosDir(): Directory {
@@ -107,15 +105,17 @@ const BASEMAPS: { key: string; label: string }[] = [
 /** Build the JSON the WebView renderer consumes. */
 async function buildPayload(run: Run, annotations: Annotation[], dims: { w: number; h: number }, pace: number, basemap: string, watermark: string) {
   const points = run.track.points.map((p) => ({ lat: p.lat, lon: p.lon, alt: p.alt ?? 0, t: p.t }));
-  let photos = 0;
   const anns = [];
   for (const a of annotations) {
     if (a.kind !== "text" && a.kind !== "photo" && a.kind !== "voice") continue;
     let img: string | undefined;
     let audio: string | undefined;
-    if (a.kind === "photo" && photos < MAX_PHOTOS) {
+    // Every photo annotation's image is embedded (no count cap). The renderer streams the
+    // payload in slices and downscales each image on load, so a photo-heavy ride stays
+    // within the bridge + WebView-memory budget instead of being silently truncated.
+    if (a.kind === "photo") {
       const u = await blobDataUri(a, "image/jpeg");
-      if (u) { img = u; photos++; }
+      if (u) img = u;
     }
     if (a.kind === "voice") {
       const u = await blobDataUri(a, "audio/m4a"); // played into the video at its dwell
@@ -220,10 +220,20 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     try { m = JSON.parse(raw); } catch { return; }
     if (m.type === "ready") {
       // Hand the (already-built) payload to the renderer to PREP. Retry if not ready yet.
+      // Stream it in slices: with every annotation photo embedded (base64), a single
+      // injectJavaScript of the whole payload can be truncated / OOM the bridge — the same
+      // reason the finished video is chunked on the way BACK. The page reassembles the
+      // string, verifies its length, then parses it in __runEnd().
       const send = (n: number) => {
         const p = payloadRef.current;
         if (!p) { if (n > 0) setTimeout(() => send(n - 1), 150); return; }
-        webRef.current?.injectJavaScript(`window.__setRun(${JSON.stringify(p)});true;`);
+        const CH = 262144; // 256 KB per slice
+        const total = Math.ceil(p.length / CH) || 1;
+        webRef.current?.injectJavaScript(`window.__runBegin(${total},${p.length});true;`);
+        for (let i = 0; i < total; i++) {
+          webRef.current?.injectJavaScript(`window.__runChunk(${i},${JSON.stringify(p.slice(i * CH, (i + 1) * CH))});true;`);
+        }
+        webRef.current?.injectJavaScript("window.__runEnd();true;");
       };
       send(25);
     } else if (m.type === "prepared") {

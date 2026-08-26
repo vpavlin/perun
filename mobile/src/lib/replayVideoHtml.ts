@@ -57,9 +57,9 @@ export function replayVideoHtml(): string {
     var s=Math.min((W-2*pad)/sx,(H-2*pad)/sy);
     var offx=(W-sx*s)/2-minx*s, offy=(H-sy*s)/2-miny*s;
     function proj(q){return [mercX(q.lon)*s+offx, mercY(q.lat)*s+offy];}
-    var annD=run.annotations.map(function(a){var bi=0,bd=1e18,j;
+    var annD=run.annotations.map(function(a,idx){var bi=0,bd=1e18,j;
       for(j=0;j<p.length;j++){var g=Math.abs(p[j].t-a.t); if(g<bd){bd=g;bi=j;}}
-      return {kind:a.kind,text:a.text,img:a.img,audio:a.audio,dur:a.dur,dist:cum[bi]};});
+      return {idx:idx,kind:a.kind,text:a.text,img:a.img,audio:a.audio,dur:a.dur,dist:cum[bi]};});
     var minA=1e9,maxA=-1e9,gain=0;
     for(i=0;i<p.length;i++){var al=p[i].alt||0; if(al<minA)minA=al; if(al>maxA)maxA=al;
       if(i>0){var dd=(p[i].alt||0)-(p[i-1].alt||0); if(dd>0)gain+=dd;}}
@@ -209,7 +209,9 @@ export function replayVideoHtml(): string {
     c.beginPath();c.moveTo(hx,y+pad);c.lineTo(hx,y+h-pad);c.stroke();c.globalAlpha=1;}
   function card(c,m,a,near,alpha,imgs){
     var W=m.W,U=m.U;
-    var im=a.kind==="photo"&&imgs[a.text]&&imgs[a.text].complete?imgs[a.text]:null;
+    // imgs[idx] is a downscaled canvas (no .complete, has width) or a small passed-through Image.
+    var g=a.kind==="photo"?imgs[a.idx]:null;
+    var im=(g && (g.complete===undefined ? g.width : (g.complete && g.naturalWidth)))?g:null;
     var w=Math.min(W*0.5,U*0.62), x=W-w-U*0.045, y=U*0.20, h=im?U*0.46:U*0.16;
     panel(c,x,y,w,h,near?1:alpha);
     c.fillStyle=a.kind==="photo"?C.photo:a.kind==="voice"?C.voice:C.prim;
@@ -249,14 +251,28 @@ export function replayVideoHtml(): string {
     if(m.wmImg && m.wmImg.complete && m.wmImg.width){ var lhO=U*0.06, lwO=lhO*(m.wmImg.width/m.wmImg.height); c.drawImage(m.wmImg, W/2-lwO/2, H*0.63, lwO, lhO); }
     c.textAlign="left";c.globalAlpha=1;}
 
+  // Downscale a loaded image to a bounded longest-side onto an offscreen canvas (returned
+  // in place of the Image so the full-res bitmap can be GC'd). Small images pass through.
+  function shrink(im){
+    var MAX=1280, w=im.naturalWidth||im.width, h=im.naturalHeight||im.height;
+    if(!w||!h) return im;
+    var s=Math.min(1,MAX/Math.max(w,h)); if(s>=1) return im;
+    try{ var oc=document.createElement("canvas"); oc.width=Math.round(w*s); oc.height=Math.round(h*s);
+      oc.getContext("2d").drawImage(im,0,0,oc.width,oc.height); return oc; }catch(e){ return im; }
+  }
+
   // PREP: build the model, preload images, decode voice audio, build the schedule, draw a
   // still first frame, then post "prepared" (with the estimated length). Does NOT record —
   // the user picks ratio/pace first and taps Start (window.__start).
   function prep(RUN){
     var m; try{ m=build(RUN); m.name=RUN.name||"Run"; }catch(e){ post({type:"error",msg:"build: "+e}); return; }
+    // Preload each annotation image, then downscale it to a bounded size (the card draws it
+    // small). Full-res phone photos decoded at native resolution would blow the WebView's
+    // memory once EVERY photo is embedded — the shrink caps decode + draw cost per image.
     var imgs=window.__imgs||{}, pend=[], k;
-    for(k in imgs){ (function(im){ pend.push(new Promise(function(res){
-      if(im.complete) return res(); im.onload=res; im.onerror=res; })); })(imgs[k]); }
+    for(k in imgs){ (function(key,im){ pend.push(new Promise(function(res){
+      function done(){ imgs[key]=shrink(im); res(); }
+      if(im.complete && im.naturalWidth) return done(); im.onload=done; im.onerror=res; })); })(k,imgs[k]); }
     // Optional watermark logo (data URI).
     if(m.wmLogo){ var wi=new Image(); wi.src=m.wmLogo; m.wmImg=wi;
       pend.push(new Promise(function(res){ if(wi.complete) return res(); wi.onload=res; wi.onerror=res; })); }
@@ -343,8 +359,16 @@ export function replayVideoHtml(): string {
 
   // Entry point; RN injects window.__setRun(<json>) after "ready", then window.__start().
   window.__setRun=function(json){ try{ var RUN=(typeof json==="string")?JSON.parse(json):json;
-    var imgs={}; (RUN.annotations||[]).forEach(function(a){ if(a.img){var im=new Image();im.src=a.img;imgs[a.text]=im;} });
+    var imgs={}; (RUN.annotations||[]).forEach(function(a,idx){ if(a.img){var im=new Image();im.src=a.img;imgs[idx]=im;} });
     window.__imgs=imgs; prep(RUN); }catch(e){ post({type:"error",msg:"setRun: "+e}); } };
+  // Chunked payload transfer (RN streams the run in slices — a big all-images payload can't
+  // ride one injectJavaScript reliably). Reassemble, verify length, then parse via __setRun.
+  var __runParts=null,__runLen=0;
+  window.__runBegin=function(total,len){ __runParts=new Array(total); __runLen=len; };
+  window.__runChunk=function(i,data){ if(__runParts) __runParts[i]=data; };
+  window.__runEnd=function(){ var s; try{ s=__runParts?__runParts.join(""):""; }catch(e){ post({type:"error",msg:"runEnd: "+e}); return; } __runParts=null;
+    if(__runLen && s.length!==__runLen){ post({type:"error",msg:"payload transfer size mismatch ("+s.length+"/"+__runLen+")"}); return; }
+    window.__setRun(s); };
   post({type:"ready"});
 })();
 </script>
