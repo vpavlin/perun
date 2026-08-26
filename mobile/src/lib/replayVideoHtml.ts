@@ -134,7 +134,7 @@ export function replayVideoHtml(): string {
     });
   }
 
-  function drawScene(m,d,imgs){
+  function drawScene(m,d,imgs,tNow){
     var c=ctx,W=m.W,H=m.H,U=m.U,i;
     c.fillStyle=C.bg; c.fillRect(0,0,W,H);
     if(m.basemap && m.basemap.tiles.length){
@@ -180,7 +180,7 @@ export function replayVideoHtml(): string {
     var feat=null,bg=1e18; for(i=0;i<m.annD.length;i++){var g=Math.abs(m.annD[i].dist-d); if(g<bg){bg=g;feat=m.annD[i];}}
     if(feat){ var near=bg<=Math.max(60,m.total*0.03);
       var fade=Math.max(0,Math.min(1,1-(bg)/Math.max(80,m.total*0.05)));
-      card(c,m,feat,near,0.35+0.65*fade,imgs); }
+      card(c,m,feat,near,0.35+0.65*fade,imgs,featuredDraws(m,feat,imgs,tNow)); }
     // watermark (just above the elevation strip) + vignette
     // Optional Perun-logo watermark (bottom-left) + run name. Off = nothing (clean video).
     var wy=H-U*0.225;
@@ -207,23 +207,54 @@ export function replayVideoHtml(): string {
     var hx=X(Math.max(0,Math.min(m.total,d)));
     c.strokeStyle=C.text;c.globalAlpha=.85;c.lineWidth=w*0.0035;
     c.beginPath();c.moveTo(hx,y+pad);c.lineTo(hx,y+h-pad);c.stroke();c.globalAlpha=1;}
-  function card(c,m,a,near,alpha,imgs){
-    var W=m.W,U=m.U;
-    // imgs[idx] is a downscaled canvas (no .complete, has width) or a small passed-through Image.
-    var g=a.kind==="photo"?imgs[a.idx]:null;
-    var im=(g && (g.complete===undefined ? g.width : (g.complete && g.naturalWidth)))?g:null;
-    var w=Math.min(W*0.5,U*0.62), x=W-w-U*0.045, y=U*0.20, h=im?U*0.46:U*0.16;
+  // The drawable for a photo annotation (downscaled canvas / passed-through Image), or null.
+  function featuredImg(a,imgs){ if(!a||a.kind!=="photo")return null; var g=imgs[a.idx];
+    return (g && (g.complete===undefined ? g.width : (g.complete && g.naturalWidth)))?g:null; }
+  // Cross-dissolve the featured photo image over ~FADE seconds when it changes (no hard
+  // flip). Time-based so it's the same short duration regardless of the playhead's speed.
+  // Returns [{g,a}] draw list for the image slot (outgoing dissolves out, incoming in), or
+  // null when there's no photo image. tNow==null (title/outro/prep still) → no transition.
+  function featuredDraws(m,feat,imgs,tNow){
+    var curG=featuredImg(feat,imgs), curIdx=(feat&&feat.kind==="photo")?feat.idx:-1;
+    if(tNow==null) return curG?[{g:curG,a:1}]:null;
+    if(!m.__fi) m.__fi={idx:curIdx,g:curG,pg:null,t0:tNow};
+    else if(curIdx!==m.__fi.idx){ m.__fi.pg=m.__fi.g; m.__fi.g=curG; m.__fi.idx=curIdx; m.__fi.t0=tNow; }
+    if(!curG) return null; // non-photo card: no image region
+    var FADE=0.3, k=Math.max(0,Math.min(1,(tNow-m.__fi.t0)/FADE)), out=[];
+    if(m.__fi.pg && k<1) out.push({g:m.__fi.pg,a:1-k}); // outgoing photo dissolves out
+    out.push({g:curG,a:k});                             // incoming photo dissolves in
+    return out;
+  }
+  function card(c,m,a,near,alpha,imgs,draws){
+    var W=m.W,U=m.U,pad=U*0.022;
+    var im=featuredImg(a,imgs);
+    var w=Math.min(W*0.5,U*0.62), x=W-w-U*0.045, y=U*0.20, headH=U*0.066;
+    var iw=w-2*pad, ix=x+pad, iy=y+headH;
+    // Image region height WRAPS the contain-fitted image: landscape → short, portrait →
+    // taller (capped), so a portrait shows the whole person instead of a cropped mid-band.
+    var ih=im?Math.min(U*0.40, iw/(im.width/im.height)):0;
+    var hasText=!!a.text;
+    // Card sizes to content: header + image (if any) + caption block ONLY when a caption
+    // exists — an uncaptioned photo has no empty text band under it.
+    var h=headH+(im?ih+pad*0.6:0)+(hasText?U*0.10:0)+pad*0.6;
     panel(c,x,y,w,h,near?1:alpha);
     c.fillStyle=a.kind==="photo"?C.photo:a.kind==="voice"?C.voice:C.prim;
-    c.font="700 "+(U*0.03)+"px "+C.sans; c.fillText(KIND[a.kind]||"\\u2022",x+U*0.022,y+U*0.05);
+    c.font="700 "+(U*0.03)+"px "+C.sans; c.fillText(KIND[a.kind]||"\\u2022",x+pad,y+U*0.05);
     c.fillStyle=C.t2; c.font="600 "+(U*0.02)+"px "+C.sans;
     c.fillText(near?"\\u25CF at this point":fmtDist(a.dist),x+U*0.07,y+U*0.047);
-    if(im){var iw=w-U*0.044,ih=U*0.26,ix=x+U*0.022,iy=y+U*0.066;
+    if(im){
       rr(c,ix,iy,iw,ih,10);c.save();c.clip();
-      var ar=im.width/im.height,tr=iw/ih,dw,dh; if(ar>tr){dh=ih;dw=ih*ar;}else{dw=iw;dh=iw/ar;}
-      c.drawImage(im,ix+(iw-dw)/2,iy+(ih-dh)/2,dw,dh);c.restore();}
-    if(a.text){c.fillStyle=C.text;c.font="500 "+(U*0.026)+"px "+C.sans;
-      wrap(c,a.text,x+U*0.022,y+(im?U*0.37:U*0.10),w-U*0.044,U*0.034);}
+      c.fillStyle="#10141a";c.fillRect(ix,iy,iw,ih); // letterbox matte (matches the card body)
+      var list=(draws&&draws.length)?draws:[{g:im,a:1}];
+      for(var di=0;di<list.length;di++){ var it=list[di]; if(!it.g||it.a<=0)continue;
+        var ar=it.g.width/it.g.height,bw,bh;          // CONTAIN-fit each image (never crop)
+        if(iw/ih>ar){bh=ih;bw=ih*ar;}else{bw=iw;bh=iw/ar;}
+        c.globalAlpha=Math.max(0,Math.min(1,it.a));
+        c.drawImage(it.g,ix+(iw-bw)/2,iy+(ih-bh)/2,bw,bh); }
+      c.globalAlpha=1;c.restore();
+    }
+    if(hasText){c.fillStyle=C.text;c.font="500 "+(U*0.026)+"px "+C.sans;
+      wrap(c,a.text,x+pad,iy+(im?ih+U*0.03:U*0.028),w-2*pad,U*0.034);}
   }
   function wrap(c,text,x,y,maxw,lh){var words=String(text).split(" "),line="",yy=y,i;
     for(i=0;i<words.length;i++){var t=line?line+" "+words[i]:words[i];
@@ -303,6 +334,7 @@ export function replayVideoHtml(): string {
 
   function record(ctx){
     var m=ctx.m,opts=ctx.opts,audio=ctx.audio,imgs=ctx.imgs,sched=ctx.sched,i;
+    m.__fi=null; // fresh image-crossfade state per render (fade the first photo in)
     var tracks=cv.captureStream(30).getVideoTracks();
     var withAudio=!!(audio&&audio.dest);
     if(withAudio){ try{ if(audio.ctx.resume)audio.ctx.resume(); tracks=tracks.concat(audio.dest.stream.getAudioTracks()); }catch(e){ withAudio=false; } }
@@ -343,7 +375,7 @@ export function replayVideoHtml(): string {
       if(window.__cancelled){ aborted=true; try{rec.stop();}catch(e){} return; }
       if(t0===null)t0=now; var el=(now-t0)/1000; post0(el/TOTAL);
       if(el<INTRO){ titleCard(m, Math.max(0,Math.min(1,el/0.3,(INTRO-el)/0.3))); }
-      else if(el<INTRO+DRAW){ var d=distAtTime(sched,el-INTRO); drawScene(m,d,imgs);
+      else if(el<INTRO+DRAW){ var d=distAtTime(sched,el-INTRO); drawScene(m,d,imgs,el-INTRO);
         if(withAudio){ var j; for(j=0;j<m.annD.length;j++){ var a=m.annD[j];
           // Fire as we ENTER the slow zone so a voice note plays through the crawl.
           if(a.kind==="voice"&&a.audio&&audio.buffers[a.dist]&&!played[a.dist]&&d>=a.dist-Math.min(m.total*0.06,120)){
