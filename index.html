@@ -105,19 +105,62 @@
   .tile h3{font-size:1.1rem; font-weight:700; letter-spacing:-.01em}
   .tile p{color:var(--text-2); font-size:.94rem; margin:7px 0 0}
 
-  /* ---------- film / video highlight ---------- */
+  /* ---------- film studio (interactive) ---------- */
   .film{background:linear-gradient(180deg, var(--inset), var(--bg)); border-top:1px solid var(--border); border-bottom:1px solid var(--border)}
-  .film .grid{display:grid; grid-template-columns:1fr 1fr; gap:44px; align-items:center}
-  @media(max-width:820px){ .film .grid{grid-template-columns:1fr; gap:26px} }
-  .frame{aspect-ratio:1/1; border-radius:18px; border:1px solid var(--border); position:relative; overflow:hidden;
-    background:#07090b; box-shadow:0 22px 60px rgba(0,0,0,.55)}
-  .frame .route{position:absolute; inset:0}
-  .frame .card3{position:absolute; left:15px; bottom:15px; width:122px; padding:9px; border-radius:11px;
-    background:rgba(18,22,26,.9); border:1px solid var(--border)}
-  .frame .card3 .ph{height:66px; border-radius:7px; background:linear-gradient(135deg,#2a2018,#14171b)}
-  .frame .card3 .cap{font-family:var(--mono); font-size:.6rem; color:var(--text-2); margin-top:6px; letter-spacing:.04em}
-  .stat{position:absolute; right:15px; top:15px; font-family:var(--mono); font-size:.62rem; text-align:right; color:var(--text-3)}
-  .stat b{display:block; color:var(--primary); font-size:1.02rem; letter-spacing:-.02em}
+  .studio{display:grid; grid-template-columns:1fr 296px; gap:34px; margin-top:32px; align-items:start}
+  @media(max-width:860px){ .studio{grid-template-columns:1fr; gap:24px} }
+  .stage-wrap{display:flex; align-items:center; justify-content:center; min-height:300px}
+  .stage{position:relative; overflow:hidden; border-radius:16px; border:1px solid var(--border);
+    background:#07090b; box-shadow:0 22px 60px rgba(0,0,0,.55); --card:.5; width:100%; aspect-ratio:1/1}
+  .stage .base{position:absolute; inset:0; transition:background .3s}
+  .stage[data-base="streets"] .base{background:
+    repeating-linear-gradient(0deg, transparent 0 26px, rgba(154,164,173,.11) 26px 27px),
+    repeating-linear-gradient(90deg, transparent 0 26px, rgba(154,164,173,.11) 26px 27px),
+    linear-gradient(#0a0d10,#0a0d10);}
+  .stage[data-base="satellite"] .base{background:
+    radial-gradient(58% 50% at 28% 34%, rgba(86,110,70,.55), transparent 70%),
+    radial-gradient(52% 60% at 76% 72%, rgba(120,96,60,.46), transparent 72%),
+    radial-gradient(42% 42% at 62% 18%, rgba(60,84,96,.4), transparent 70%),
+    linear-gradient(#0b0f0b,#0b0f0b);}
+  .stage .route{position:absolute; inset:0; width:100%; height:100%}
+  .stage .stat{position:absolute; right:12px; top:11px; font-family:var(--mono); font-size:.6rem; text-align:right;
+    color:#dfe5ea; text-shadow:0 1px 4px rgba(0,0,0,.75); z-index:3}
+  .stage .stat b{display:block; color:var(--primary); font-size:1rem; letter-spacing:-.02em}
+  .stage .wm{position:absolute; right:12px; bottom:11px; width:32px; height:32px; border-radius:8px;
+    opacity:0; transition:opacity .25s; border:1px solid rgba(255,255,255,.14); z-index:3}
+  .stage[data-wm="on"] .wm{opacity:.92}
+  /* the annotation photo — card (corner, sized) vs hero (full-frame, timed) */
+  .stage .photo{position:absolute; overflow:hidden; z-index:2;
+    background:linear-gradient(135deg,#3a2a1c,#161a1f) center/cover;}
+  .stage .photo .cap{position:absolute; left:9px; bottom:8px; font-family:var(--mono); font-size:.58rem;
+    letter-spacing:.05em; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.85)}
+  .stage[data-photo="card"] .photo{left:12px; bottom:12px; border-radius:10px; border:1px solid var(--border);
+    width:calc(24% + var(--card) * 26%); aspect-ratio:4/3; opacity:.96}
+  .stage[data-photo="hero"] .photo{inset:0; width:auto; aspect-ratio:auto; border:0; border-radius:inherit;
+    opacity:0; animation:heroShow 7s ease-in-out infinite}
+  .stage[data-photo="hero"] .photo .cap{left:14px; bottom:13px; font-size:.72rem}
+  @keyframes heroShow{0%,12%{opacity:0} 26%,46%{opacity:1} 58%,100%{opacity:0}}
+
+  /* control panel — chips + slider, styled like the app's export sheet */
+  .panel{display:flex; flex-direction:column; gap:19px}
+  .ctl .lab{display:block; margin-bottom:9px; font-family:var(--mono); text-transform:uppercase;
+    letter-spacing:.18em; font-size:.6rem; color:var(--text-3)}
+  .chips{display:flex; gap:7px}
+  .chip{flex:1 1 0; min-width:0; cursor:pointer; border:1px solid var(--border); background:var(--card);
+    border-radius:10px; padding:9px 6px; text-align:center; transition:.14s; font:inherit; color:var(--text-2)}
+  .chip:hover{border-color:var(--primary-dim)}
+  .chip.on{border-color:var(--primary); background:var(--primary-dim); color:var(--text)}
+  .chip .t{display:block; font-weight:700; font-size:.8rem; color:var(--text); white-space:nowrap}
+  .chip .h{display:block; font-family:var(--mono); font-size:.54rem; letter-spacing:.02em; color:var(--text-3); margin-top:3px}
+  .chip.on .h{color:var(--primary-2)}
+  .ctl .row{display:flex; align-items:center; gap:10px}
+  .ctl .row .cap{font-family:var(--mono); font-size:.6rem; color:var(--text-3)}
+  .ctl input[type=range]{-webkit-appearance:none; appearance:none; height:4px; border-radius:3px; background:var(--border); flex:1; outline:none}
+  .ctl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--primary); cursor:pointer; border:2px solid #20140a}
+  .ctl input[type=range]::-moz-range-thumb{width:16px; height:16px; border-radius:50%; background:var(--primary); cursor:pointer; border:2px solid #20140a; border-width:2px}
+  .ctl .pct{font-family:var(--mono); font-size:.64rem; color:var(--primary-2); min-width:34px; text-align:right}
+  .ctl.dim{opacity:.4; pointer-events:none}
+  @media (prefers-reduced-motion: reduce){ .stage[data-photo="hero"] .photo{opacity:.85; animation:none} }
 
   /* ---------- install ---------- */
   .install .cols{display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-top:30px}
@@ -247,26 +290,71 @@
   </div>
 </section>
 
-<!-- FILM highlight -->
+<!-- FILM highlight (interactive) -->
 <section class="film section" id="film">
-  <div class="wrap grid">
-    <div class="frame" aria-hidden="true">
-      <svg class="route" viewBox="0 0 480 480" fill="none">
-        <path id="rt" d="M 60 300 C 120 120, 250 260, 300 150 S 400 60, 430 200 S 300 380, 360 420" stroke="#2a2018" stroke-width="11" stroke-linecap="round"/>
-        <path d="M 60 300 C 120 120, 250 260, 300 150 S 400 60, 430 200 S 300 380, 360 420" stroke="#f0883e" stroke-width="4" stroke-linecap="round" stroke-dasharray="5 11" opacity=".95"/>
-        <circle cx="300" cy="150" r="4.5" fill="#f6a463"/><circle cx="430" cy="200" r="4.5" fill="#f6a463"/>
-        <circle r="12" fill="#f0883e" opacity=".22"><animateMotion dur="7s" repeatCount="indefinite"><mpath href="#rt"/></animateMotion></circle>
-        <circle r="6" fill="#ffe9d6"><animateMotion dur="7s" repeatCount="indefinite"><mpath href="#rt"/></animateMotion></circle>
-      </svg>
-      <div class="stat">12.4<span style="font-size:.62rem"> km</span><b>4:52 /km</b></div>
-      <div class="card3"><div class="ph"></div><div class="cap">KM 8 · SUMMIT</div></div>
+  <div class="wrap">
+    <span class="eyebrow">New · try the controls</span>
+    <h2>Turn a ride into a film.</h2>
+    <p class="intro">Perun renders a cinematic video of your ride, entirely on-device — the route drawing itself across the map, your annotation photos rising as the dot passes them. These are the app's real export controls. Flip them and watch the frame change.</p>
+    <div class="studio">
+      <div class="stage-wrap">
+        <div class="stage" id="stage" data-ratio="square" data-base="none" data-photo="card" data-wm="on" style="--card:.5">
+          <div class="base"></div>
+          <svg class="route" viewBox="0 0 480 480" preserveAspectRatio="xMidYMid slice" fill="none" aria-hidden="true">
+            <path id="rt" d="M 60 300 C 120 120, 250 260, 300 150 S 400 60, 430 200 S 300 380, 360 420" stroke="#2a2018" stroke-width="11" stroke-linecap="round"/>
+            <path d="M 60 300 C 120 120, 250 260, 300 150 S 400 60, 430 200 S 300 380, 360 420" stroke="#f0883e" stroke-width="4" stroke-linecap="round" stroke-dasharray="5 11" opacity=".95"/>
+            <circle cx="300" cy="150" r="4.5" fill="#f6a463"/><circle cx="430" cy="200" r="4.5" fill="#f6a463"/>
+            <circle r="12" fill="#f0883e" opacity=".22"><animateMotion dur="7s" repeatCount="indefinite"><mpath href="#rt"/></animateMotion></circle>
+            <circle r="6" fill="#ffe9d6"><animateMotion dur="7s" repeatCount="indefinite"><mpath href="#rt"/></animateMotion></circle>
+          </svg>
+          <div class="photo"><div class="cap">KM 8 · SUMMIT</div></div>
+          <div class="stat">12.4<span style="font-size:.6rem"> km</span><b>4:52 /km</b></div>
+          <img class="wm" src="logo.png" alt="">
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ctl" data-group="ratio">
+          <span class="lab">Format</span>
+          <div class="chips">
+            <button class="chip on" data-val="square"><span class="t">1:1</span><span class="h">Instagram</span></button>
+            <button class="chip" data-val="landscape"><span class="t">16:9</span><span class="h">YouTube</span></button>
+            <button class="chip" data-val="portrait"><span class="t">9:16</span><span class="h">Reels</span></button>
+          </div>
+        </div>
+        <div class="ctl" data-group="base">
+          <span class="lab">Basemap</span>
+          <div class="chips">
+            <button class="chip on" data-val="none"><span class="t">None</span><span class="h">offline</span></button>
+            <button class="chip" data-val="streets"><span class="t">Streets</span></button>
+            <button class="chip" data-val="satellite"><span class="t">Satellite</span></button>
+          </div>
+        </div>
+        <div class="ctl" data-group="photo">
+          <span class="lab">Annotation photos</span>
+          <div class="chips">
+            <button class="chip on" data-val="card"><span class="t">▢ Card</span><span class="h">corner</span></button>
+            <button class="chip" data-val="hero"><span class="t">◆ Hero</span><span class="h">full-frame</span></button>
+          </div>
+        </div>
+        <div class="ctl" id="sizeCtl">
+          <span class="lab">Card size</span>
+          <div class="row">
+            <span class="cap">Small</span>
+            <input type="range" id="cardSize" min="0" max="1" step="0.01" value="0.5" aria-label="Card size">
+            <span class="cap">Large</span>
+            <span class="pct" id="cardPct">61%</span>
+          </div>
+        </div>
+        <div class="ctl" data-group="wm">
+          <span class="lab">Watermark</span>
+          <div class="chips">
+            <button class="chip on" data-val="on"><span class="t">◉ Perun logo</span></button>
+            <button class="chip" data-val="off"><span class="t">◎ Off</span></button>
+          </div>
+        </div>
+      </div>
     </div>
-    <div>
-      <span class="eyebrow">New</span>
-      <h2>Turn a ride into a film.</h2>
-      <p class="intro">Perun renders a cinematic video of your ride — the route drawing itself across a dark map, your annotation photos rising full-frame as the dot passes them, a quick cross-dissolve between shots.</p>
-      <p style="color:var(--text-2); margin-top:14px">It's built entirely on-device: no upload, no render farm, nothing leaves your phone. Pick the size, hero the photos or tuck them in a card, and share the clip. A paused stretch even shows honestly, as a dashed bridge — because a film of your ride should be true to it.</p>
-    </div>
+    <p class="intro" style="margin-top:26px; max-width:62ch">No upload, no render farm, nothing leaves your phone. A paused stretch even shows honestly, as a dashed bridge — because a film of your ride should be true to it.</p>
   </div>
 </section>
 
@@ -313,6 +401,47 @@
     <p class="fine">Built on the Logos stack — local-first data, peer-to-peer sync over Waku, no accounts and no clouds. A rebuild of the original <a href="https://github.com/vpavlin/perun-legacy">perun-legacy</a> as a native mobile app plus a Basecamp analytics module.</p>
   </div>
 </footer>
+
+<script>
+(function(){
+  var stage = document.getElementById('stage');
+  if(!stage) return;
+  var RATIO = { square:1, landscape:16/9, portrait:9/16 };
+  function fit(){
+    var wrap = stage.parentElement;
+    var bw = wrap.clientWidth || 400, bh = 434;
+    var r = RATIO[stage.dataset.ratio] || 1;
+    var w = bw, h = w / r;
+    if(h > bh){ h = bh; w = h * r; }
+    if(w > bw){ w = bw; h = w / r; }
+    stage.style.width = Math.round(w) + 'px';
+    stage.style.height = Math.round(h) + 'px';
+  }
+  document.querySelectorAll('.ctl[data-group]').forEach(function(ctl){
+    var group = ctl.dataset.group;
+    ctl.querySelectorAll('.chip').forEach(function(chip){
+      chip.addEventListener('click', function(){
+        ctl.querySelectorAll('.chip').forEach(function(c){ c.classList.remove('on'); });
+        chip.classList.add('on');
+        stage.dataset[group] = chip.dataset.val;
+        if(group === 'ratio') fit();
+        if(group === 'photo'){
+          document.getElementById('sizeCtl').classList.toggle('dim', chip.dataset.val === 'hero');
+        }
+      });
+    });
+  });
+  var sl = document.getElementById('cardSize'), pct = document.getElementById('cardPct');
+  function upd(){
+    var v = parseFloat(sl.value);
+    stage.style.setProperty('--card', v);
+    pct.textContent = Math.round((0.5 + 0.22 * v) * 100) + '%';
+  }
+  sl.addEventListener('input', upd);
+  upd(); fit();
+  window.addEventListener('resize', fit);
+})();
+</script>
 
 </body>
 </html>
