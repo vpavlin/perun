@@ -3,140 +3,145 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Perun</title>
 <meta name="description" content="Privacy-first GPS run &amp; ride tracker. Local-first, syncs peer-to-peer to your Basecamp desktop over Logos. Your routes stay yours — guarded like the Dark Forest.">
 <link rel="icon" href="logo.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+  /* Palette lifted 1:1 from the app's theme.ts so phone, desktop and web are one product. */
   :root{
-    --ground:#0a0b0e; --ground-2:#0d0f14; --panel:#13161d; --panel-2:#171b23;
-    --ink:#eeece6; --ink-dim:#b7bcc5; --muted:#848b96; --line:#232833;
-    --bolt:#7ea8ff; --bolt-soft:#3a4d78; --ember:#e0a04a;
-    --maxw:1080px;
+    --bg:#0d1013; --inset:#12161a; --elevated:#161a1f; --card:#1a1f25; --border:#242a30;
+    --text:#eef1f4; --text-2:#9aa4ad; --text-3:#5f6b73;
+    --primary:#f0883e; --primary-2:#f6a463; --primary-dim:#3a2a1c;
+    --success:#56d364; --error:#f85149;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --maxw:1060px;
   }
   *{box-sizing:border-box}
-  html{-webkit-text-size-adjust:100%}
+  html{-webkit-text-size-adjust:100%; scroll-behavior:smooth}
   body{
-    margin:0; background:var(--ground); color:var(--ink);
-    font-family:"Manrope",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-    line-height:1.6; letter-spacing:.1px; overflow-x:hidden;
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:var(--sans); line-height:1.62; letter-spacing:.1px; overflow-x:hidden;
     background-image:
-      radial-gradient(1200px 620px at 78% -8%, rgba(126,168,255,.10), transparent 60%),
-      radial-gradient(900px 520px at 8% 108%, rgba(126,168,255,.05), transparent 55%);
+      radial-gradient(1100px 560px at 82% -10%, rgba(240,136,62,.13), transparent 58%),
+      radial-gradient(760px 460px at 4% 106%, rgba(240,136,62,.055), transparent 55%);
   }
   .wrap{max-width:var(--maxw); margin:0 auto; padding:0 22px}
-  h1,h2,h3,.display{font-family:"Oswald",system-ui,sans-serif; font-weight:600; letter-spacing:.02em; text-wrap:balance; margin:0}
   a{color:inherit}
-  .eyebrow{font-family:"Oswald",sans-serif; text-transform:uppercase; letter-spacing:.34em; font-size:.72rem; font-weight:500; color:var(--muted)}
+  h1,h2,h3{margin:0; font-weight:800; letter-spacing:-.02em; text-wrap:balance}
+  .mono{font-family:var(--mono)}
+  .eyebrow{font-family:var(--mono); text-transform:uppercase; letter-spacing:.22em; font-size:.7rem;
+    font-weight:600; color:var(--primary)}
 
   /* ---------- top bar ---------- */
-  header.bar{position:sticky; top:0; z-index:20; backdrop-filter:blur(8px);
-    background:linear-gradient(var(--ground), rgba(10,11,14,.72)); border-bottom:1px solid var(--line)}
-  .bar .wrap{display:flex; align-items:center; gap:14px; height:62px}
-  .bar .mark{width:30px; height:30px; border-radius:50%; border:1px solid var(--line); flex:0 0 auto}
-  .bar b{font-family:"Oswald",sans-serif; font-weight:600; letter-spacing:.16em; text-transform:uppercase; font-size:1rem}
-  .bar nav{margin-left:auto; display:flex; gap:26px; font-size:.9rem}
-  .bar nav a{color:var(--ink-dim); text-decoration:none; transition:color .15s}
-  .bar nav a:hover{color:var(--ink)}
+  header.bar{position:sticky; top:0; z-index:20; backdrop-filter:blur(9px);
+    background:linear-gradient(var(--bg), rgba(13,16,19,.74)); border-bottom:1px solid var(--border)}
+  .bar .wrap{display:flex; align-items:center; gap:13px; height:60px}
+  .bar .mark{width:28px; height:28px; border-radius:8px; border:1px solid var(--border); flex:0 0 auto}
+  .bar b{font-weight:800; letter-spacing:.02em; font-size:1.04rem}
+  .bar nav{margin-left:auto; display:flex; gap:24px; font-size:.9rem}
+  .bar nav a{color:var(--text-2); text-decoration:none; transition:color .15s}
+  .bar nav a:hover{color:var(--text)}
   @media(max-width:640px){ .bar nav{display:none} }
 
   /* ---------- hero ---------- */
-  .hero{position:relative; padding:78px 0 30px}
-  .hero .grid{display:grid; grid-template-columns:1.15fr .85fr; gap:40px; align-items:center}
-  @media(max-width:820px){ .hero .grid{grid-template-columns:1fr; text-align:center; gap:26px} }
-  .hero h1{font-size:clamp(3.1rem,10vw,6.2rem); font-weight:700; line-height:.94; letter-spacing:.01em}
-  .hero .lede{font-size:clamp(1.08rem,2.4vw,1.32rem); color:var(--ink-dim); max-width:33ch; margin:20px 0 0}
+  .hero{position:relative; padding:74px 0 26px}
+  .hero .grid{display:grid; grid-template-columns:1.12fr .88fr; gap:40px; align-items:center}
+  @media(max-width:820px){ .hero .grid{grid-template-columns:1fr; text-align:center; gap:24px} }
+  .hero h1{font-size:clamp(3rem,10.5vw,6rem); line-height:.92; letter-spacing:-.035em; font-weight:800}
+  .hero h1 .u{color:var(--primary)}
+  .hero .lede{font-size:clamp(1.06rem,2.4vw,1.3rem); color:var(--text); max-width:32ch; margin:20px 0 0; font-weight:500}
   @media(max-width:820px){ .hero .lede{margin-inline:auto} }
-  .hero .sub{margin-top:14px; color:var(--muted); max-width:44ch; font-size:.98rem}
+  .hero .sub{margin-top:13px; color:var(--text-2); max-width:46ch; font-size:.98rem}
   @media(max-width:820px){ .hero .sub{margin-inline:auto} }
-  .cta{display:flex; gap:12px; margin-top:28px; flex-wrap:wrap}
+  .cta{display:flex; gap:11px; margin-top:26px; flex-wrap:wrap}
   @media(max-width:820px){ .cta{justify-content:center} }
-  .btn{font-family:"Oswald",sans-serif; text-transform:uppercase; letter-spacing:.12em; font-size:.86rem;
-    padding:13px 20px; border-radius:9px; text-decoration:none; display:inline-flex; align-items:center; gap:9px; transition:.15s}
-  .btn.primary{background:var(--ink); color:#0a0b0e; font-weight:600}
-  .btn.primary:hover{background:#fff; transform:translateY(-1px)}
-  .btn.ghost{border:1px solid var(--line); color:var(--ink-dim)}
-  .btn.ghost:hover{border-color:var(--bolt-soft); color:var(--ink)}
+  .btn{font-weight:700; font-size:.92rem; padding:12px 19px; border-radius:11px; text-decoration:none;
+    display:inline-flex; align-items:center; gap:8px; transition:.15s; border:1px solid transparent}
+  .btn.primary{background:var(--primary); color:#20140a}
+  .btn.primary:hover{background:var(--primary-2); transform:translateY(-1px)}
+  .btn.ghost{border-color:var(--border); color:var(--text-2); background:var(--elevated)}
+  .btn.ghost:hover{border-color:var(--primary-dim); color:var(--text)}
 
   .emblem{position:relative; justify-self:center}
-  .emblem img{width:min(340px,74vw); height:auto; display:block;
-    filter:drop-shadow(0 12px 40px rgba(0,0,0,.6)); border-radius:50%}
-  .emblem::after{content:""; position:absolute; inset:-18% -18%; z-index:-1; border-radius:50%;
-    background:radial-gradient(closest-side, rgba(126,168,255,.16), transparent 72%)}
+  .emblem img{width:min(320px,72vw); height:auto; display:block; border-radius:22px;
+    border:1px solid var(--border); filter:drop-shadow(0 16px 48px rgba(0,0,0,.6))}
+  .emblem::after{content:""; position:absolute; inset:-16% -16%; z-index:-1; border-radius:50%;
+    background:radial-gradient(closest-side, rgba(240,136,62,.20), transparent 72%)}
 
-  /* thin animated bolt divider */
-  .bolt-rule{height:1px; margin:8px 0 0; border:0; background:linear-gradient(90deg,transparent, var(--line) 12%, var(--line) 88%, transparent)}
-
-  .badges{display:flex; gap:26px; flex-wrap:wrap; margin-top:36px; color:var(--muted); font-size:.86rem}
+  .badges{display:flex; gap:22px; flex-wrap:wrap; margin-top:32px; font-family:var(--mono); font-size:.78rem; color:var(--text-3)}
   @media(max-width:820px){ .badges{justify-content:center} }
-  .badges b{color:var(--ink); font-weight:600}
+  .badges b{color:var(--text); font-weight:600}
 
-  /* ---------- lore ---------- */
-  .lore{padding:64px 0 8px}
-  .lore .card{border:1px solid var(--line); border-radius:16px; padding:34px 34px 30px;
-    background:linear-gradient(180deg,var(--panel), var(--ground-2)); position:relative; overflow:hidden}
-  .lore .card::before{content:""; position:absolute; right:-40px; top:-60px; width:260px; height:260px;
-    background:radial-gradient(closest-side, rgba(126,168,255,.10), transparent 70%)}
-  .lore blockquote{margin:0; font-family:"Oswald",sans-serif; font-weight:300; font-size:clamp(1.4rem,4vw,2.2rem);
-    line-height:1.22; letter-spacing:.01em; color:var(--ink); max-width:24ch}
-  .lore blockquote .b{color:var(--bolt)}
-  .lore p{color:var(--ink-dim); max-width:60ch; margin:18px 0 0}
+  /* ---------- section frame ---------- */
+  section.section{padding:66px 0}
+  .section > .wrap > .eyebrow{display:block; margin-bottom:11px}
+  .section h2{font-size:clamp(1.85rem,5vw,2.6rem); max-width:22ch; letter-spacing:-.025em}
+  .section .intro{color:var(--text-2); max-width:56ch; margin:14px 0 0}
+
+  /* ---------- myth / story ---------- */
+  .myth{position:relative; border-top:1px solid var(--border); border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg, var(--inset), var(--bg))}
+  .myth .grid{display:grid; grid-template-columns:.9fr 1.1fr; gap:44px; align-items:start}
+  @media(max-width:820px){ .myth .grid{grid-template-columns:1fr; gap:26px} }
+  .myth .bolt{width:100%; max-width:220px; opacity:.9; margin-top:6px}
+  @media(max-width:820px){ .myth .bolt{max-width:120px} }
+  .myth blockquote{margin:0 0 22px; font-size:clamp(1.5rem,4.4vw,2.25rem); line-height:1.16;
+    letter-spacing:-.02em; font-weight:800; color:var(--text); max-width:20ch}
+  .myth blockquote .p{color:var(--primary)}
+  .myth p{color:var(--text-2); max-width:60ch; margin:0 0 15px}
+  .myth p b{color:var(--text); font-weight:600}
+  .myth p.turn{color:var(--text)}
+  .myth p.turn b{color:var(--primary)}
 
   /* ---------- features ---------- */
-  section.section{padding:66px 0}
-  .section > .wrap > .eyebrow{display:block; margin-bottom:10px}
-  .section h2{font-size:clamp(1.9rem,5vw,2.7rem); font-weight:600; max-width:20ch}
-  .section .intro{color:var(--muted); max-width:56ch; margin:14px 0 0}
-  .feat{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:34px}
+  .feat{display:grid; grid-template-columns:repeat(3,1fr); gap:15px; margin-top:34px}
   @media(max-width:820px){ .feat{grid-template-columns:1fr 1fr} }
   @media(max-width:520px){ .feat{grid-template-columns:1fr} }
-  .tile{border:1px solid var(--line); border-radius:14px; padding:22px 20px; background:var(--panel);
-    transition:.18s; position:relative}
-  .tile:hover{border-color:var(--bolt-soft); transform:translateY(-2px); background:var(--panel-2)}
-  .tile .ic{width:34px; height:34px; color:var(--bolt); margin-bottom:14px}
-  .tile h3{font-size:1.14rem; font-weight:600; letter-spacing:.02em}
-  .tile p{color:var(--muted); font-size:.95rem; margin:8px 0 0}
-  .tile .tag{position:absolute; top:16px; right:16px; font-family:"Oswald",sans-serif; font-size:.62rem;
-    letter-spacing:.18em; text-transform:uppercase; color:var(--ember); border:1px solid rgba(224,160,74,.35);
-    padding:3px 8px; border-radius:20px}
+  .tile{border:1px solid var(--border); border-radius:14px; padding:22px 20px; background:var(--card); transition:.18s}
+  .tile:hover{border-color:var(--primary-dim); transform:translateY(-2px); background:var(--elevated)}
+  .tile .ic{width:32px; height:32px; color:var(--primary); margin-bottom:13px}
+  .tile h3{font-size:1.1rem; font-weight:700; letter-spacing:-.01em}
+  .tile p{color:var(--text-2); font-size:.94rem; margin:7px 0 0}
 
   /* ---------- film / video highlight ---------- */
-  .film{background:linear-gradient(180deg,var(--ground-2), var(--ground)); border-top:1px solid var(--line); border-bottom:1px solid var(--line)}
+  .film{background:linear-gradient(180deg, var(--inset), var(--bg)); border-top:1px solid var(--border); border-bottom:1px solid var(--border)}
   .film .grid{display:grid; grid-template-columns:1fr 1fr; gap:44px; align-items:center}
   @media(max-width:820px){ .film .grid{grid-template-columns:1fr; gap:26px} }
-  .frame{aspect-ratio:1/1; border-radius:18px; border:1px solid var(--line); position:relative; overflow:hidden;
-    background:#000; box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .frame{aspect-ratio:1/1; border-radius:18px; border:1px solid var(--border); position:relative; overflow:hidden;
+    background:#07090b; box-shadow:0 22px 60px rgba(0,0,0,.55)}
   .frame .route{position:absolute; inset:0}
-  .frame .dot{position:absolute; width:14px; height:14px; border-radius:50%; background:var(--bolt);
-    box-shadow:0 0 16px 4px rgba(126,168,255,.7); offset-path:path('M 60 300 C 120 120, 250 260, 300 150 S 400 60, 430 200 S 300 380, 360 420'); animation:ride 7s linear infinite}
-  @keyframes ride{from{offset-distance:0%} to{offset-distance:100%}}
-  .frame .card3{position:absolute; left:16px; bottom:16px; width:120px; padding:9px; border-radius:10px;
-    background:rgba(16,20,26,.86); border:1px solid var(--line)}
-  .frame .card3 .ph{height:64px; border-radius:6px; background:linear-gradient(135deg,#2a3340,#151a22)}
-  .frame .card3 .cap{font-size:.62rem; color:var(--muted); margin-top:6px}
+  .frame .card3{position:absolute; left:15px; bottom:15px; width:122px; padding:9px; border-radius:11px;
+    background:rgba(18,22,26,.9); border:1px solid var(--border)}
+  .frame .card3 .ph{height:66px; border-radius:7px; background:linear-gradient(135deg,#2a2018,#14171b)}
+  .frame .card3 .cap{font-family:var(--mono); font-size:.6rem; color:var(--text-2); margin-top:6px; letter-spacing:.04em}
+  .stat{position:absolute; right:15px; top:15px; font-family:var(--mono); font-size:.62rem; text-align:right; color:var(--text-3)}
+  .stat b{display:block; color:var(--primary); font-size:1.02rem; letter-spacing:-.02em}
 
   /* ---------- install ---------- */
-  .install .cols{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:30px}
+  .install .cols{display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-top:30px}
   @media(max-width:700px){ .install .cols{grid-template-columns:1fr} }
-  .col{border:1px solid var(--line); border-radius:14px; padding:24px; background:var(--panel)}
-  .col h3{font-size:1.2rem; display:flex; align-items:center; gap:10px}
-  .col p{color:var(--muted); font-size:.94rem; margin:8px 0 14px}
-  .code{display:block; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--bolt);
-    background:var(--ground); border:1px solid var(--line); border-radius:9px; padding:11px 13px; overflow-x:auto; white-space:nowrap}
-  .col .note{color:var(--muted); font-size:.82rem; margin-top:12px}
+  .col{border:1px solid var(--border); border-radius:14px; padding:24px; background:var(--card)}
+  .col h3{font-size:1.16rem; display:flex; align-items:center; gap:10px; font-weight:700}
+  .col p{color:var(--text-2); font-size:.93rem; margin:8px 0 14px}
+  .code{display:block; font-family:var(--mono); font-size:.78rem; color:var(--primary-2);
+    background:var(--bg); border:1px solid var(--border); border-radius:9px; padding:11px 13px; overflow-x:auto; white-space:nowrap}
+  .col .note{color:var(--text-3); font-size:.82rem; margin-top:12px}
+  .col .note a{color:var(--primary-2); text-decoration:none} .col .note a:hover{text-decoration:underline}
 
   /* ---------- footer ---------- */
-  footer{border-top:1px solid var(--line); padding:40px 0 60px; margin-top:20px; color:var(--muted)}
-  footer .grid{display:flex; align-items:center; gap:16px; flex-wrap:wrap}
-  footer .mark{width:26px;height:26px;border-radius:50%;border:1px solid var(--line)}
-  footer a{color:var(--ink-dim); text-decoration:none}
-  footer a:hover{color:var(--bolt)}
-  footer .links{margin-left:auto; display:flex; gap:22px; font-size:.9rem}
+  footer{border-top:1px solid var(--border); padding:38px 0 58px; margin-top:20px; color:var(--text-3)}
+  footer .row{display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+  footer .mark{width:24px;height:24px;border-radius:7px;border:1px solid var(--border)}
+  footer a{color:var(--text-2); text-decoration:none}
+  footer a:hover{color:var(--primary)}
+  footer .links{margin-left:auto; display:flex; gap:20px; font-size:.9rem}
   @media(max-width:560px){ footer .links{margin-left:0} }
-  .fine{margin-top:16px; font-size:.8rem; color:var(--muted); max-width:60ch}
+  .fine{margin-top:15px; font-size:.8rem; color:var(--text-3); max-width:62ch}
+  .fine a{color:var(--text-2); text-decoration:none} .fine a:hover{color:var(--primary)}
   svg{display:block}
+  @media (prefers-reduced-motion: reduce){ *{animation:none !important} html{scroll-behavior:auto} }
 </style>
 </head>
 <body>
@@ -146,9 +151,9 @@
     <img class="mark" src="logo.png" alt="">
     <b>Perun</b>
     <nav>
+      <a href="#myth">Myth</a>
       <a href="#track">Track</a>
       <a href="#film">Films</a>
-      <a href="#private">Private</a>
       <a href="#get">Get&nbsp;it</a>
       <a href="https://github.com/vpavlin/perun">Source</a>
     </nav>
@@ -160,7 +165,7 @@
   <div class="wrap grid">
     <div>
       <span class="eyebrow">Slavic thunder · privacy-first</span>
-      <h1>RUN<br>UNSEEN.</h1>
+      <h1>RUN<br><span class="u">UNSEEN.</span></h1>
       <p class="lede">Your runs, routes and rides — hidden as the secrets of an ancient, mystical forest.</p>
       <p class="sub">A GPS tracker for running and cycling that keeps every trace on <em>your</em> devices, and syncs peer-to-peer to your desktop over Logos. No account. No servers. No prying eyes.</p>
       <div class="cta">
@@ -179,16 +184,24 @@
       <img src="logo.png" alt="Perun — a running Slavic thunder-god">
     </div>
   </div>
-  <div class="wrap"><hr class="bolt-rule"></div>
 </section>
 
-<!-- LORE -->
-<section class="lore">
-  <div class="wrap">
-    <div class="card">
-      <span class="eyebrow">The name</span>
-      <blockquote style="margin-top:14px">Perun, god of thunder, guarded the <span class="b">Dark Forest</span>. This app guards your trace.</blockquote>
-      <p>In Slavic myth Perun rides the storm and keeps what is hidden, hidden. Modern running apps do the opposite — they hand your movements, your home, your habits to companies you'll never meet. Perun takes the old bargain back: <b>your data is private by default</b>, revealed only when <em>you</em> decide.</p>
+<!-- MYTH -->
+<section class="myth section" id="myth">
+  <div class="wrap grid">
+    <div>
+      <span class="eyebrow">The myth</span>
+      <blockquote>What is yours should stay yours — and what comes for it should be met with <span class="p">thunder</span>.</blockquote>
+      <svg class="bolt" viewBox="0 0 120 260" fill="none" aria-hidden="true">
+        <path d="M70 4 L26 140 L60 140 L44 256 L104 108 L66 108 Z" fill="#f0883e" opacity=".16"/>
+        <path d="M70 4 L26 140 L60 140 L44 256 L104 108 L66 108 Z" stroke="#f0883e" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div>
+      <p>Perun is the Slavic god of thunder and the storm — sky-father, lord of the sacred oak, keeper of order. He rides the heavens in a chariot of fire, and in his hand is the axe of lightning that always returns to him once thrown.</p>
+      <p>His eternal adversary is <b>Veles</b>, the horned serpent who lives among the roots of the world. Veles slips up from the dark to steal — cattle, waters, people — and drag them down to hoard where no light reaches. Each time, Perun hunts him across the sky and strikes, splitting oak and stone, until what was taken is returned. Then the rain falls, and the world is set right.</p>
+      <p>It is an old story about a simple idea, and it stands guard over the <b>Dark Forest</b> — the deep, unmapped place where a thing can stay hidden and safe.</p>
+      <p class="turn">Today the serpent wears a different face. Modern trackers take your movements, your routes, your home, and hoard them in databases you will never see. <b>Perun takes the old bargain back.</b> Your runs stay in the open sky of your own devices — struck through with lightning the moment anyone reaches for them.</p>
     </div>
   </div>
 </section>
@@ -198,12 +211,12 @@
   <div class="wrap">
     <span class="eyebrow">What it does</span>
     <h2>Record the run. Keep the run.</h2>
-    <p class="intro">Live map, splits, pace, elevation and heart-rate — the detail you want from a tracker, without the surveillance you didn't ask for.</p>
+    <p class="intro">Live map, splits, pace and elevation — the detail you want from a tracker, without the surveillance you didn't ask for.</p>
     <div class="feat">
       <div class="tile">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
         <h3>Run &amp; ride</h3>
-        <p>Live GPS with a map that draws itself, and a full breakdown after — distance, splits, pace, elevation, HR. Runs and bike rides alike.</p>
+        <p>Live GPS with a map that draws itself, and a full breakdown after — distance, splits, pace, elevation. Runs and bike rides alike.</p>
       </div>
       <div class="tile">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
@@ -213,22 +226,22 @@
       <div class="tile">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12a8 8 0 0 1 8-8M20 12a8 8 0 0 1-8 8"/><circle cx="12" cy="12" r="2.5"/><path d="M12 4v3M12 17v3"/></svg>
         <h3>Sync over Logos</h3>
-        <p>Runs travel peer-to-peer over Waku to the <b>Perun Analytics</b> module on your Basecamp desktop — a bigger screen for splits and history, still no server in the middle.</p>
+        <p>Runs travel peer-to-peer over Waku to the <b style="color:var(--text)">Perun Analytics</b> module on your Basecamp desktop — a bigger screen for splits and history, still no server in the middle.</p>
       </div>
       <div class="tile">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l2.4 5 5.6.6-4.2 3.8 1.2 5.6L12 20l-5 2 1.2-5.6L4 12.6 9.6 12z"/></svg>
-        <h3>Proof-of-Run</h3>
-        <p>Share a verified statistic from a run — the number, provably, without handing over the whole route. Your achievement, not your address.</p>
-      </div>
-      <div class="tile">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2.5"/><path d="M3 15l4-3 3 2 4-4 7 6"/></svg>
         <h3>Annotate the route</h3>
         <p>Drop photos along the way as you go. Each becomes a waypoint on the map — and a frame in your ride film.</p>
       </div>
       <div class="tile">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M3 12h18" opacity=".0"/><path d="M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/></svg>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/></svg>
         <h3>Works offline</h3>
         <p>Out of signal in the hills? It records anyway and reconciles later. Local-first isn't a setting — it's the whole design.</p>
+      </div>
+      <div class="tile">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 18l-5-6 5-6M16 6l5 6-5 6M13 4l-2 16"/></svg>
+        <h3>Open source</h3>
+        <p>Built in the open on the Logos stack. Read the code, build it yourself, verify the privacy claims for real.</p>
       </div>
     </div>
   </div>
@@ -239,19 +252,20 @@
   <div class="wrap grid">
     <div class="frame" aria-hidden="true">
       <svg class="route" viewBox="0 0 480 480" fill="none">
-        <path id="rt" d="M 60 300 C 120 120, 250 260, 300 150 S 400 60, 430 200 S 300 380, 360 420" stroke="#2a3446" stroke-width="10" stroke-linecap="round"/>
-        <path d="M 60 300 C 120 120, 250 260, 300 150 S 400 60, 430 200 S 300 380, 360 420" stroke="#7ea8ff" stroke-width="4" stroke-linecap="round" stroke-dasharray="6 10" opacity=".9"/>
-        <circle cx="300" cy="150" r="4.5" fill="#e0a04a"/><circle cx="430" cy="200" r="4.5" fill="#e0a04a"/>
-        <circle r="12" fill="#7ea8ff" opacity=".22"><animateMotion dur="7s" repeatCount="indefinite" rotate="auto"><mpath href="#rt"/></animateMotion></circle>
-        <circle r="6" fill="#eaf1ff"><animateMotion dur="7s" repeatCount="indefinite"><mpath href="#rt"/></animateMotion></circle>
+        <path id="rt" d="M 60 300 C 120 120, 250 260, 300 150 S 400 60, 430 200 S 300 380, 360 420" stroke="#2a2018" stroke-width="11" stroke-linecap="round"/>
+        <path d="M 60 300 C 120 120, 250 260, 300 150 S 400 60, 430 200 S 300 380, 360 420" stroke="#f0883e" stroke-width="4" stroke-linecap="round" stroke-dasharray="5 11" opacity=".95"/>
+        <circle cx="300" cy="150" r="4.5" fill="#f6a463"/><circle cx="430" cy="200" r="4.5" fill="#f6a463"/>
+        <circle r="12" fill="#f0883e" opacity=".22"><animateMotion dur="7s" repeatCount="indefinite"><mpath href="#rt"/></animateMotion></circle>
+        <circle r="6" fill="#ffe9d6"><animateMotion dur="7s" repeatCount="indefinite"><mpath href="#rt"/></animateMotion></circle>
       </svg>
-      <div class="card3"><div class="ph"></div><div class="cap">km 8 · summit</div></div>
+      <div class="stat">12.4<span style="font-size:.62rem"> km</span><b>4:52 /km</b></div>
+      <div class="card3"><div class="ph"></div><div class="cap">KM 8 · SUMMIT</div></div>
     </div>
     <div>
       <span class="eyebrow">New</span>
       <h2>Turn a ride into a film.</h2>
-      <p class="intro">Perun renders a cinematic video of your ride — the route drawing itself across a dark map, your annotation photos rising full-frame as the dot passes them, a quick cross-dissolve between shots. It's built entirely on-device: no upload, no render farm, nothing leaves your phone.</p>
-      <p style="color:var(--ink-dim); margin-top:14px">Pick the size, hero the photos or tuck them in a card, and share the clip. The recording of a paused stretch even shows honestly, as a dashed bridge — because a film of your ride should be true to it.</p>
+      <p class="intro">Perun renders a cinematic video of your ride — the route drawing itself across a dark map, your annotation photos rising full-frame as the dot passes them, a quick cross-dissolve between shots.</p>
+      <p style="color:var(--text-2); margin-top:14px">It's built entirely on-device: no upload, no render farm, nothing leaves your phone. Pick the size, hero the photos or tuck them in a card, and share the clip. A paused stretch even shows honestly, as a dashed bridge — because a film of your ride should be true to it.</p>
     </div>
   </div>
 </section>
@@ -265,21 +279,21 @@
     <div class="cols">
       <div class="col">
         <h3>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--bolt)" stroke-width="1.8"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.8"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/></svg>
           Android
         </h3>
-        <p>Add the F-Droid repository below in your F-Droid client, then install <b>Perun</b>. Signed, reproducible, updates in place.</p>
+        <p>Add the F-Droid repository below in your F-Droid client, then install <b style="color:var(--text)">Perun</b>. Signed, reproducible, updates in place.</p>
         <code class="code">https://apps.vpavlin.xyz/fdroid/repo</code>
-        <div class="note">Or grab the signed APK from a <a href="https://github.com/vpavlin/perun/releases" style="color:var(--bolt)">GitHub release</a>.</div>
+        <div class="note">Or grab the signed APK from a <a href="https://github.com/vpavlin/perun/releases">GitHub release</a>.</div>
       </div>
       <div class="col">
         <h3>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--bolt)" stroke-width="1.8"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.8"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
           Basecamp desktop
         </h3>
-        <p>Add this package repository in Basecamp's package manager, then install <b>Perun Analytics</b> for splits, elevation and history.</p>
+        <p>Add this package repository in Basecamp's package manager, then install <b style="color:var(--text)">Perun Analytics</b> for splits, elevation and history.</p>
         <code class="code">…/vpavlin/perun/master/repo/logos-repo.json</code>
-        <div class="note">Full URL &amp; details in the <a href="https://github.com/vpavlin/perun#install-in-basecamp" style="color:var(--bolt)">README</a>.</div>
+        <div class="note">Full URL &amp; details in the <a href="https://github.com/vpavlin/perun#readme">README</a>.</div>
       </div>
     </div>
   </div>
@@ -287,7 +301,7 @@
 
 <footer>
   <div class="wrap">
-    <div class="grid">
+    <div class="row">
       <img class="mark" src="logo.png" alt="">
       <span>Perun — run unseen.</span>
       <div class="links">
@@ -296,7 +310,7 @@
         <a href="https://logos.co">Logos</a>
       </div>
     </div>
-    <p class="fine">Built on the Logos stack — local-first data, peer-to-peer sync over Waku, no accounts and no clouds. A rebuild of the original <a href="https://github.com/vpavlin/perun-legacy" style="color:var(--ink-dim)">perun-legacy</a> as a native mobile app plus a Basecamp analytics module.</p>
+    <p class="fine">Built on the Logos stack — local-first data, peer-to-peer sync over Waku, no accounts and no clouds. A rebuild of the original <a href="https://github.com/vpavlin/perun-legacy">perun-legacy</a> as a native mobile app plus a Basecamp analytics module.</p>
   </div>
 </footer>
 
