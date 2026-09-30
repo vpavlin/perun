@@ -66,6 +66,22 @@ export function onAnnotationsChanged(cb: ChangeCb): () => void {
 }
 
 // ---- persistence ------------------------------------------------------------
+// Every write is a read-modify-write of the run's whole list, and the receive path
+// fires one insert per incoming message — two unserialized writers each read the same
+// list and the later write silently drops the other's annotation. So all writes to a
+// run's key go through a per-runId promise-chain mutex (withRunLock).
+const runLocks = new Map<string, Promise<void>>();
+function withRunLock<T>(runId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = runLocks.get(runId) ?? Promise.resolve();
+  const next = prev.then(fn);
+  const tail = next.then(() => {}, () => {}); // a failed writer must not wedge the chain
+  runLocks.set(runId, tail);
+  void tail.then(() => {
+    if (runLocks.get(runId) === tail) runLocks.delete(runId);
+  });
+  return next;
+}
+
 async function readRaw(runId: string): Promise<StoredAnnotation[]> {
   try {
     const raw = await AsyncStorage.getItem(key(runId));
@@ -88,21 +104,43 @@ function toWire(a: StoredAnnotation): Annotation {
 }
 
 /** Insert one annotation (dedup by id). `synced` marks whether it's already on the wire. */
-async function insert(a: Annotation, synced: boolean): Promise<boolean> {
-  const list = await readRaw(a.runId);
-  const existing = list.findIndex((x) => x.id === a.id);
-  if (existing >= 0) {
-    // Already have it. Only upgrade the synced flag (true wins) — content is immutable.
-    if (synced && !list[existing].synced) {
-      list[existing].synced = true;
-      await writeRaw(a.runId, list);
+function insert(a: Annotation, synced: boolean): Promise<boolean> {
+  return withRunLock(a.runId, async () => {
+    const list = await readRaw(a.runId);
+    const existing = list.findIndex((x) => x.id === a.id);
+    if (existing >= 0) {
+      // Already have it. Only upgrade the synced flag (true wins) — content is immutable.
+      if (synced && !list[existing].synced) {
+        list[existing].synced = true;
+        await writeRaw(a.runId, list);
+      }
+      return false;
     }
-    return false;
-  }
-  list.push({ ...a, synced });
-  await writeRaw(a.runId, list);
-  notifyChange(a.runId);
-  return true;
+    list.push({ ...a, synced });
+    await writeRaw(a.runId, list);
+    notifyChange(a.runId);
+    return true;
+  });
+}
+
+/**
+ * Flip `synced` on the given ids — re-reading the list UNDER the lock, so a sender that
+ * worked from an older snapshot never writes that stale list back over newer inserts.
+ */
+function markSynced(runId: string, ids: Iterable<string>): Promise<void> {
+  const want = new Set(ids);
+  if (!want.size) return Promise.resolve();
+  return withRunLock(runId, async () => {
+    const list = await readRaw(runId);
+    let changed = false;
+    for (const a of list) {
+      if (want.has(a.id) && !a.synced) {
+        a.synced = true;
+        changed = true;
+      }
+    }
+    if (changed) await writeRaw(runId, list);
+  });
 }
 
 // ---- display ----------------------------------------------------------------
@@ -159,9 +197,10 @@ export interface NewAnnotation {
 }
 
 /**
- * Author an annotation: persist locally (offline-first), then best-effort send it on
- * the run's sealed channel. Never throws for a send failure — the note is safe locally
- * and retried later (resendUnsynced). Returns the stored Annotation.
+ * Author an annotation: persist locally FIRST (offline-first — it shows immediately),
+ * then send it on the run's sealed channel in the background and mark it synced on
+ * success. Never awaits the network and never throws for a send failure — the note is
+ * safe locally and retried later (resendUnsynced). Returns the stored Annotation.
  */
 export async function authorAnnotation(input: NewAnnotation): Promise<Annotation> {
   const author = await getDeviceId().catch(() => "perun-unknown");
@@ -182,14 +221,12 @@ export async function authorAnnotation(input: NewAnnotation): Promise<Annotation
   if (input.dur != null) a.dur = input.dur;
   if (input.target) a.target = input.target;
 
-  let sent = false;
-  try {
-    await sendAnnotation(a);
-    sent = true;
-  } catch {
-    /* offline / unpaired — kept locally, resent later */
-  }
-  await insert(a, sent);
+  await insert(a, false); // persists + notifies the UI
+  void sendAnnotation(a)
+    .then(() => markSynced(a.runId, [a.id]))
+    .catch(() => {
+      /* offline / unpaired — kept locally (synced:false), resent later */
+    });
   return a;
 }
 
@@ -237,19 +274,21 @@ export async function resendUnsynced(): Promise<void> {
   for (const k of keys) {
     if (!k.startsWith("perun:ann:")) continue;
     const runId = k.slice("perun:ann:".length);
-    const list = await readRaw(runId);
-    let changed = false;
+    const list = await readRaw(runId); // snapshot to send from; flags flip under the lock
+    const sent: string[] = [];
+    let down = false;
     for (const a of list) {
       if (a.synced) continue;
       try {
         await sendAnnotation(toWire(a));
-        a.synced = true;
-        changed = true;
+        sent.push(a.id);
       } catch {
-        break; // node down — stop, try again next time
+        down = true; // node down — stop, try again next time
+        break;
       }
     }
-    if (changed) await writeRaw(runId, list);
+    await markSynced(runId, sent);
+    if (down) return;
   }
 }
 
@@ -268,21 +307,22 @@ export async function syncRunFull(run: Run, onStatus?: (s: string) => void): Pro
 
   // 2. Annotations: send EVERY event for this run (text/photo/voice/edit/delete),
   //    idempotent by id, and mark them synced. Collect the media blobs to push.
-  const list = await readRaw(run.id);
+  const list = await readRaw(run.id); // snapshot to send from; flags flip under the lock
   const blobs = new Map<string, string>(); // blobId -> mime (dedup)
+  const sent: string[] = [];
   let notes = 0, notesFail = 0;
   for (const a of list) {
     if (a.blobId && a.mime) blobs.set(a.blobId, a.mime);
     try {
       await sendAnnotation(toWire(a));
-      a.synced = true;
+      sent.push(a.id);
       notes++;
       onStatus?.(`Annotations: ${notes}/${list.length} sent…`);
     } catch {
       notesFail++; // node hiccup — leave unsynced, resendUnsynced retries later
     }
   }
-  if (list.length) await writeRaw(run.id, list);
+  await markSynced(run.id, sent);
 
   // 3. Media: push a sealed copy of each referenced blob to the server.
   let media = 0, mediaFail = 0;
