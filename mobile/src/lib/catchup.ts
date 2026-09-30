@@ -44,7 +44,10 @@ async function annEvents(): Promise<Event[]> {
       const wall =
         typeof a.createdAt === "number" ? a.createdAt : typeof a.t === "number" ? a.t : 0;
       const dev = typeof a.author === "string" ? a.author : "";
-      out.push({ v: 1, id: a.id, type: "ANNOTATION", hlc: { wall, ctr: 0, dev }, dev, payload: a });
+      // payload = the WIRE shape: drop the local-only `synced` flag, or a catch-up serve
+      // would emit different bytes than the original send of the same annotation.
+      const { synced: _local, ...wire } = a;
+      out.push({ v: 1, id: a.id, type: "ANNOTATION", hlc: { wall, ctr: 0, dev }, dev, payload: wire });
     }
   }
   return out;

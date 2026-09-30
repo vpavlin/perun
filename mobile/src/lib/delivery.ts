@@ -14,6 +14,7 @@ import { seal, open, topicFor, Identity } from "./identity";
 import * as transport from "./loam-transport";
 import * as SecureStore from "expo-secure-store";
 import * as Crypto from "expo-crypto";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 const HEX = "0123456789abcdef";
 const hex = (b: Uint8Array) => { let s = ""; for (const x of b) s += HEX[x >> 4] + HEX[x & 15]; return s; };
@@ -162,7 +163,8 @@ export async function ensureNode(onStatus?: (s: string) => void): Promise<string
 export async function sendEnvelope(env: object): Promise<void> {
   await ensureNode();
   const r = route!;
-  const sealed = seal(r.id, sealIdFor(env), utf8Bytes(JSON.stringify(env)), r.topic);
+  const plain = utf8Bytes(JSON.stringify(env));
+  const sealed = seal(r.id, sealIdFor(env, plain), plain, r.topic);
   await transport.publishSealed(r.topic, sealed);
 }
 
@@ -170,15 +172,20 @@ export async function sendEnvelope(env: object): Promise<void> {
 // immutable and uniquely identified by run+rev+seq, so re-sending it re-seals
 // byte-identical → the fleet store dedups it. Any other (control) frame gets a
 // fresh random id so distinct control frames are never collapsed together.
-function sealIdFor(env: object): string {
+function sealIdFor(env: object, plain: Uint8Array): string {
   const e = env as { type?: unknown; id?: unknown; rev?: unknown; seq?: unknown; a?: { id?: unknown } };
   if (e.type === "CHUNK" && e.id != null && e.rev != null && e.seq != null) {
     return `${e.id}|${e.rev}|${e.seq}`;
   }
-  // An ANNOTATION is immutable and uniquely identified by a.id — seal it deterministically
-  // too, so a re-send is byte-identical and the fleet store dedups it (matches CHUNK).
+  // An ANNOTATION is immutable and identified by a.id — seal it deterministically too, so
+  // a byte-identical re-send re-seals identically and the fleet store dedups it. But the
+  // SAME a.id can be serialized differently (key order, a stray local field, another
+  // device's JSON encoder), and one nonce over two different plaintexts breaks
+  // ChaCha20-Poly1305. So the id also carries a hash of the exact plaintext: equal bytes
+  // → equal nonce (dedup kept), different bytes → different nonce (never reused).
+  // Receivers read the nonce from the wire, so the id format is ours alone.
   if (e.type === "ANNOTATION" && e.a && e.a.id != null) {
-    return `ann|${e.a.id}`;
+    return `ann|${e.a.id}|${hex(sha256(plain)).slice(0, 16)}`;
   }
   return hex(Crypto.getRandomBytes(12));
 }
