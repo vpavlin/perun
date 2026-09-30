@@ -60,9 +60,26 @@ export async function sendSyncReq(): Promise<void> {
   await sendEnvelope({ v: 1, type: "SYNC_REQ", msg });
 }
 
+// Round-opening requests (a full-range fp — what buildInitial sends) answered per peer.
+// Every peer runs the 0/3/10/25s ladder on each start / sync, and each full answer can
+// re-serve the whole diff, so with a few devices the mesh fills with duplicate serves.
+// Answer a peer's round-opener at most once per OPEN_THROTTLE_MS; follow-up sub-range
+// fp/ids/need messages (the rest of a round already under way) are never throttled.
+const OPEN_THROTTLE_MS = 10000;
+const lastOpenAnswer = new Map<string, number>();
+function throttledOpener(m: CatchupMsg): boolean {
+  if (m.t !== "fp" || m.lo !== undefined || m.hi !== undefined) return false;
+  const now = Date.now();
+  const last = lastOpenAnswer.get(m.from) ?? 0;
+  if (now - last < OPEN_THROTTLE_MS) return true;
+  lastOpenAnswer.set(m.from, now);
+  return false;
+}
+
 /** Respond to an incoming fp/ids/need: serve annotations the peer lacks + range replies. */
 export async function onSyncReq(msg: unknown): Promise<void> {
   if (!msg || typeof msg !== "object") return;
+  if (throttledOpener(msg as CatchupMsg)) return;
   const me = await getDeviceId();
   const step = respond(await annEvents(), msg as CatchupMsg, me);
   for (const e of step.serve) {
