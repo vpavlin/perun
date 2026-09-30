@@ -86,10 +86,14 @@ export async function loadRuns(): Promise<Run[]> {
   }
 }
 
-/** Delete one run by id (both its blob and its index entry). Idempotent. */
+// A run's journey annotations live under their own key (annotations.ts). Deleting the
+// run must drop them too, or resendUnsynced keeps re-sending notes for a run that's gone.
+const annKey = (id: string) => `perun:ann:${id}`;
+
+/** Delete one run by id (its blob, its annotations and its index entry). Idempotent. */
 export async function deleteRun(id: string): Promise<void> {
   if (typeof id !== 'string' || id.length === 0) return;
-  await AsyncStorage.removeItem(runKey(id));
+  await AsyncStorage.multiRemove([runKey(id), annKey(id)]);
   const ids = await readIndex();
   const next = ids.filter((x) => x !== id);
   if (next.length !== ids.length) {
