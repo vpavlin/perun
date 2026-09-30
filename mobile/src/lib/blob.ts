@@ -211,7 +211,9 @@ export async function replicatePending(): Promise<void> {
     const ext = dot > 0 ? name.slice(dot + 1) : "bin";
     if (!isCid(cid) || synced.has(cid)) continue;
     const ok = await replicateBlob(cid, ext); // ext round-trips through extForMime
-    if (!ok) break; // backend down — stop; try again next time
+    // Keep going: one un-replicable blob (e.g. sealed under an old pairing key, so its
+    // cid can't be reproduced) must not block every blob after it. Retried next time.
+    if (!ok) console.log("[perun] blob replicate failed, continuing:", cid.slice(0, 12));
   }
 }
 
