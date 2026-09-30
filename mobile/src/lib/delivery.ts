@@ -134,8 +134,8 @@ function adapterReceive(topic: string, candidates: Uint8Array[]): boolean {
  * Bring the node up once (idempotent): load identity (must be paired) → start the
  * shared transport on the pair's derived topic. Concurrent callers share the
  * transport's in-flight startup. Rejects with NOT_PAIRED if the phone isn't paired.
- * Routes through the device-wide Logos Delivery service when the user enabled it
- * ("perun-shared-node"), else the app embeds its own node. Returns the node ctx.
+ * Routes through the device-wide Logos Delivery service unless the user turned it off
+ * ("perun-shared-node" = "0"), else the app embeds its own node. Returns the node ctx.
  */
 export async function ensureNode(onStatus?: (s: string) => void): Promise<string> {
   if (!transport.deliveryAvailable()) throw new Error("Logos Delivery native module not present in this build");
@@ -148,7 +148,9 @@ export async function ensureNode(onStatus?: (s: string) => void): Promise<string
   const deviceId = await getDeviceId();
   // Must be set BEFORE the first transport call.
   try {
-    const shared = (await SecureStore.getItemAsync("perun-shared-node")) === "1";
+    // Default ON: only an explicit "0" opts out. The transport falls back to an embedded
+    // node on its own when the Logos Delivery (Loam) service isn't installed / bindable.
+    const shared = (await SecureStore.getItemAsync("perun-shared-node")) !== "0";
     (transport as { preferServiceBackend?: (on: boolean, appId: string) => void }).preferServiceBackend?.(shared, "perun");
   } catch {
     /* default to embedded */

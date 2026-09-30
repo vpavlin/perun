@@ -31,10 +31,11 @@ export function PairingScreen({
   const [permission, requestPermission] = useCameraPermissions();
   const busy = useRef(false); // debounce rapid duplicate barcode callbacks
 
-  // Delivery backend: Perun's own embedded node, or the device-wide Logos Delivery node.
-  // Read at node bring-up (delivery.ts); needs a restart to take effect.
-  const [sharedNode, setSharedNode] = useState(false);
-  useEffect(() => { SecureStore.getItemAsync("perun-shared-node").then((v) => setSharedNode(v === "1")).catch(() => {}); }, []);
+  // Delivery backend: the device-wide Logos Delivery node (default), or Perun's own
+  // embedded node. Read at node bring-up (delivery.ts); needs a restart to take effect.
+  // Default ON — only a stored "0" means off (must match delivery.ts ensureNode).
+  const [sharedNode, setSharedNode] = useState(true);
+  useEffect(() => { SecureStore.getItemAsync("perun-shared-node").then((v) => setSharedNode(v !== "0")).catch(() => {}); }, []);
   const setSharedNodePref = (v: boolean) => { setSharedNode(v); SecureStore.setItemAsync("perun-shared-node", v ? "1" : "0").catch(() => {}); };
 
   // Recording: auto-pause when you stop moving (default ON).
@@ -157,8 +158,8 @@ export function PairingScreen({
           </View>
           <Text style={styles.nodeNote}>
             {sharedNode
-              ? "Sync runs through the Logos Delivery app's one device-wide node — install it and approve Perun once. Keeps syncing when Perun is backgrounded. Restart Perun to apply."
-              : "Perun runs its own embedded node (default). Restart Perun to apply a change."}
+              ? "Sync runs through the Logos Delivery app's one device-wide node (default) — install it and approve Perun once. Keeps syncing when Perun is backgrounded. Without it, Perun falls back to its own node. Restart Perun to apply a change."
+              : "Perun runs its own embedded node. Restart Perun to apply a change."}
           </Text>
         </View>
 
