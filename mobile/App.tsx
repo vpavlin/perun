@@ -9,7 +9,7 @@ import {
   computeSummary, computeSplits, fmtDist, fmtPace, fmtDur, fmtElev,
   fmtRate, rateLabel, fmtDate, groupByWeek, tailByDistance,
 } from "./src/lib/analytics";
-import { useRecorder, useGpsProbe, clearStaleTask } from "./src/lib/recorder";
+import { useRecorder, useGpsProbe, clearStaleTask, loadCheckpoint, clearCheckpoint } from "./src/lib/recorder";
 import { loadRuns, saveRun, deleteRun } from "./src/lib/store";
 import { loadIdentity } from "./src/lib/identityStore";
 import { exportRun } from "./src/lib/gpxExport";
@@ -68,6 +68,41 @@ export default function App() {
 
   useEffect(() => { loadRuns().then(setRuns); }, []);
 
+  // Crash recovery: a recording checkpoint still on disk at launch means the last
+  // run never saved (process killed mid-run, or its save failed). Offer it back.
+  useEffect(() => {
+    (async () => {
+      const ck = await loadCheckpoint();
+      if (!ck) return;
+      const existing = await loadRuns();
+      // Saved fine but the clear didn't land — don't overwrite the (maybe renamed) run.
+      if (ck.points.length < 2 || existing.some((r) => r.id === ck.runId)) {
+        await clearCheckpoint();
+        return;
+      }
+      const track: Track = { sport: ck.sport, hasAlt: true, hasHr: false, points: ck.points };
+      const sum = computeSummary(track);
+      Alert.alert(
+        "Recover unsaved run?",
+        `A ${sportInfo(ck.sport).label.toLowerCase()} from ${fmtDate(ck.points[0].t)} was interrupted before it was saved.\n\n` +
+          `${fmtDist(sum.distanceM)} · ${fmtDur(sum.durationS)}`,
+        [
+          {
+            text: "Discard", style: "destructive",
+            onPress: () => {
+              Alert.alert("Discard run?", "The recovered track will be deleted for good.", [
+                { text: "Cancel", style: "cancel", onPress: () => {} },
+                { text: "Discard", style: "destructive", onPress: () => { void clearCheckpoint(); } },
+              ]);
+            },
+          },
+          { text: "Recover", onPress: () => { void saveTrack(track, ck.runId); } },
+        ],
+        { cancelable: false }
+      );
+    })().catch(() => {});
+  }, []);
+
   // Self-heal: a location task left registered by a crashed run can be restored
   // at launch and crash-loop the app. Clear any stale one on start.
   useEffect(() => { clearStaleTask(); }, []);
@@ -118,25 +153,67 @@ export default function App() {
     return () => sub.remove();
   }, [counting, pairing, rec.isRecording, selected]);
 
+  // Save a finished (or recovered) track as a run. A failed save must NEVER lose
+  // the run: the recorder's checkpoint stays on disk (offered again at next launch)
+  // and the Alert offers a retry or a GPX export right now. Clears the checkpoint
+  // only once the run is safely stored.
+  const saveTrack = async (track: Track, runId: string) => {
+    // Name by date, not `Run ${runs.length+1}` — that collides after any delete.
+    track.name = `${sportInfo(track.sport).label} · ${fmtDate(track.points[0]?.t ?? Date.now())}`;
+    const run = makeRun(track, runId);
+    try {
+      await saveRun(run);
+    } catch (e) {
+      Alert.alert(
+        "Couldn't save run",
+        `${e instanceof Error ? e.message : String(e)}\n\n` +
+          "The track is NOT lost: it's kept on this phone and will be offered again next time Perun starts. " +
+          "You can also export it as GPX now, or free up space and retry.",
+        [
+          { text: "Later", style: "cancel" },
+          { text: "Export GPX", onPress: () => { exportRun(run).catch(() => {}); } },
+          { text: "Retry", onPress: () => { void saveTrack(track, runId); } },
+        ]
+      );
+      return;
+    }
+    await clearCheckpoint();
+    setRuns((r) => [run, ...r.filter((x) => x.id !== run.id)]);
+    setSelected(run);
+  };
+
   const stopAndSave = async () => {
     const track = await rec.stop();
     // Don't vanish silently: a run with no usable GPS used to just disappear and
     // dump you back on the list with no explanation.
     if (track.points.length < 2) {
+      await clearCheckpoint(); // nothing worth recovering
       Alert.alert(
         "Nothing to save",
         "No usable GPS points were recorded — check that location is enabled and you have a clear view of the sky."
       );
       return;
     }
-    // Name by date, not `Run ${runs.length+1}` — that collides after any delete.
-    track.name = `${sportInfo(track.sport).label} · ${fmtDate(track.points[0]?.t ?? Date.now())}`;
     // Reuse the id minted at record-start so any annotations pinned mid-run attach to
     // this saved run (fallback keeps a legacy path working if runId is ever empty).
-    const run = makeRun(track, rec.runId || "run-" + Date.now());
-    await saveRun(run);
-    setRuns((r) => [run, ...r]);
-    setSelected(run);
+    await saveTrack(track, rec.runId || "run-" + Date.now());
+  };
+
+  // Countdown finished → start recording. A false start (location denied / watch
+  // failed) used to be silent unless the run list happened to be empty.
+  const beginRecording = async () => {
+    setCounting(false);
+    const ok = await rec.start(sport);
+    if (!ok) {
+      Alert.alert(
+        "Can't start recording",
+        "Perun couldn't start GPS — usually location permission is denied. Enable location for Perun in the app settings and try again.",
+        [
+          { text: "OK", style: "cancel" },
+          { text: "Open settings", onPress: () => { Linking.openSettings().catch(() => {}); } },
+        ]
+      );
+    }
   };
 
   // Persist an edited run (name/category) and refresh list + detail.
@@ -413,7 +490,7 @@ export default function App() {
 
       {counting && (
         <Countdown
-          onDone={() => { setCounting(false); rec.start(sport); }}
+          onDone={() => { void beginRecording(); }}
           onCancel={() => setCounting(false)}
         />
       )}

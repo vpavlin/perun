@@ -40,6 +40,7 @@
       "./plugins/withLogosDelivery",
       "./plugins/withForegroundService.js",
       "./plugins/withReleaseSigning",
+      "./plugins/withAsyncStorageSize",
       "expo-sharing",
       [
         "expo-location",

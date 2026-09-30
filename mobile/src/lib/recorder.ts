@@ -8,6 +8,7 @@
 //
 // No HR: phones lack a heart-rate sensor, so hasHr stays false.
 import { useCallback, useEffect, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { startRunService, stopRunService, updateRunNotification } from "./keepalive";
@@ -241,6 +242,82 @@ class Session {
 export const session = new Session();
 let fgSub: Location.LocationSubscription | null = null;
 
+// ---- crash checkpoint -------------------------------------------------------
+// The in-progress run lives only in session.points (memory). If the process dies
+// mid-run (OOM, crash, swipe-away, battery) the whole recording was lost. So every
+// CHECKPOINT_MS while recording we overwrite ONE AsyncStorage key with the session
+// so far; App clears it after a successful save (or a discard) and, at launch,
+// offers to recover a checkpoint that is still there. Points are stored as compact
+// tuples [lat, lon, t, alt|null, speed|null, brk?1:0] — about half the JSON of
+// GeoPoint objects, which matters for multi-hour runs.
+const CHECKPOINT_KEY = "perun:rec:checkpoint";
+const CHECKPOINT_MS = 30000;
+let ckptTimer: ReturnType<typeof setInterval> | null = null;
+let ckptWrittenLen = -1; // points.length at the last write — skip no-op rewrites
+
+type PointTuple = [number, number, number, number | null, number | null, 0 | 1];
+
+/** A recovered in-progress run: what App needs to rebuild and save it. */
+export interface RecordingCheckpoint {
+  runId: string;
+  sport: Sport;
+  startedAt: number;
+  savedAt: number;
+  points: GeoPoint[];
+}
+
+async function writeCheckpoint(force = false): Promise<void> {
+  if (!session.runId) return;
+  if (!force && session.points.length === ckptWrittenLen) return;
+  const pts: PointTuple[] = session.points.map((p) => [
+    p.lat, p.lon, p.t, p.alt ?? null, p.speed ?? null, p.brk ? 1 : 0,
+  ]);
+  const body = { v: 1, runId: session.runId, sport: session.sport, startedAt: session.startedAt, savedAt: Date.now(), pts };
+  try {
+    await AsyncStorage.setItem(CHECKPOINT_KEY, JSON.stringify(body));
+    ckptWrittenLen = session.points.length;
+  } catch (e) {
+    console.log("[perun] checkpoint write failed:", e); // best-effort; next tick retries
+  }
+}
+
+/** The checkpoint left by an interrupted (or not-yet-saved) recording, or null. */
+export async function loadCheckpoint(): Promise<RecordingCheckpoint | null> {
+  try {
+    const raw = await AsyncStorage.getItem(CHECKPOINT_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || typeof o.runId !== "string" || !Array.isArray(o.pts)) return null;
+    const points: GeoPoint[] = [];
+    for (const t of o.pts as PointTuple[]) {
+      if (!Array.isArray(t) || typeof t[0] !== "number" || typeof t[1] !== "number" || typeof t[2] !== "number") continue;
+      const p: GeoPoint = { lat: t[0], lon: t[1], t: t[2] };
+      if (typeof t[3] === "number") p.alt = t[3];
+      if (typeof t[4] === "number") p.speed = t[4];
+      if (t[5]) p.brk = true;
+      points.push(p);
+    }
+    return {
+      runId: o.runId,
+      sport: sportInfo(o.sport).id,
+      startedAt: typeof o.startedAt === "number" ? o.startedAt : points[0]?.t ?? 0,
+      savedAt: typeof o.savedAt === "number" ? o.savedAt : 0,
+      points,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Drop the checkpoint — call after the run saved successfully or was discarded. */
+export async function clearCheckpoint(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(CHECKPOINT_KEY);
+  } catch {
+    /* ignore — a stale checkpoint is offered once and then cleared */
+  }
+}
+
 /** No-op kept so callers (App.tsx) stay stable while background recording is out. */
 export async function clearStaleTask(): Promise<void> { /* nothing registered */ }
 
@@ -290,6 +367,10 @@ export async function startRecording(sport: Sport = "running"): Promise<boolean>
       session.tickAutoPause();
       updateRunNotification(notifText(session.liveStats()));
     }, 2000);
+    // Crash checkpoint (see writeCheckpoint): the run survives a process death.
+    if (ckptTimer) clearInterval(ckptTimer);
+    ckptWrittenLen = -1;
+    ckptTimer = setInterval(() => { void writeCheckpoint(); }, CHECKPOINT_MS);
     return true;
   } catch (e) {
     console.log("[perun] watchPositionAsync failed:", e);
@@ -299,10 +380,17 @@ export async function startRecording(sport: Sport = "running"): Promise<boolean>
   }
 }
 
-/** Stop recording and return the finished Track. Never throws. */
+/**
+ * Stop recording and return the finished Track. Never throws. Writes a final
+ * checkpoint, so if the caller's save then fails the run is still on disk and
+ * offered for recovery at next launch; the caller clears it once saved/discarded.
+ */
 export async function stopRecording(): Promise<Track> {
   if (notifTimer) { clearInterval(notifTimer); notifTimer = null; }
+  if (ckptTimer) { clearInterval(ckptTimer); ckptTimer = null; }
+  const wasRecording = session.recording;
   session.end();
+  if (wasRecording) await writeCheckpoint(true);
   if (fgSub) { try { fgSub.remove(); } catch { /* ignore */ } fgSub = null; }
   await stopRunService();
   return session.toTrack();
