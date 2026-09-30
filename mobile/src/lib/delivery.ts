@@ -139,7 +139,9 @@ function adapterReceive(topic: string, candidates: Uint8Array[]): boolean {
  */
 export async function ensureNode(onStatus?: (s: string) => void): Promise<string> {
   if (!transport.deliveryAvailable()) throw new Error("Logos Delivery native module not present in this build");
-  if (transport.getCtx()) return transport.getCtx(); // already up
+  // Already up AND routed. A ctx without a route means stopNode() ran (pairing changed):
+  // fall through, reload the identity and (re)start on the new pairing's topic.
+  if (transport.getCtx() && route) return transport.getCtx();
   const id = await loadIdentity();
   if (!id) throw new Error(NOT_PAIRED);
   route = { id, topic: topicFor(id) };
@@ -198,7 +200,13 @@ export function onMessage(cb: (env: unknown) => void): () => void {
   };
 }
 
-/** Stop the node (best-effort). */
+/**
+ * Stop the node and drop the pair route (best-effort). Call whenever the pairing
+ * changes (re-pair / unpair): the route and the node's subscribed topic are bound to
+ * the OLD key, and ensureNode would otherwise keep using them until an app restart.
+ * The next ensureNode reloads the identity — or rejects NOT_PAIRED after an unpair,
+ * so nothing is sent on a stale key.
+ */
 export async function stopNode(): Promise<void> {
   route = null;
   try {

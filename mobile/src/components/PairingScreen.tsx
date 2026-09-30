@@ -10,6 +10,7 @@ import * as SecureStore from "expo-secure-store";
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-camera";
 import { Identity, secretFromScan } from "../lib/identity";
 import { loadIdentity, saveSecret, clearIdentity } from "../lib/identityStore";
+import { stopNode } from "../lib/delivery";
 import { getAutoPause, setAutoPause, getBlobServer, setBlobServer } from "../lib/settings";
 import { theme } from "../theme";
 
@@ -56,6 +57,9 @@ export function PairingScreen({
       try {
         const secret = secretFromScan(text);
         const id = await saveSecret(secret);
+        // The running node + route are bound to the old pairing's key/topic: drop them so
+        // the next send (App re-starts receive on onChange) comes up on the new pairing.
+        await stopNode();
         setIdentity(id);
         setScanning(false);
         setManual("");
@@ -98,6 +102,7 @@ export function PairingScreen({
         text: "Unpair", style: "destructive",
         onPress: async () => {
           await clearIdentity();
+          await stopNode(); // stop sending: ensureNode now rejects NOT_PAIRED
           setIdentity(null);
           onChange?.(null);
         },
