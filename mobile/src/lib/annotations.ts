@@ -12,6 +12,7 @@
 // even with no network / no pairing), then best-effort sent. Unsent ones carry a local
 // `synced:false` flag and are retried whenever the receiver comes up (resendUnsynced).
 import { useEffect, useState } from "react";
+import { AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 import { GeoPoint, Run } from "./types";
@@ -350,11 +351,19 @@ export async function syncRunFull(run: Run, onStatus?: (s: string) => void): Pro
   catchupLadder(); // also RBSR-reconcile so we pull anything peers have that we lack
 }
 
+// Node start retry: a failed first start (offline at launch, shared node not up yet…)
+// used to leave receive dead until an app restart. Back off 15s → 30s → 60s (cap), and
+// also retry whenever the app returns to the foreground.
+const START_RETRY_MIN_MS = 15000;
+const START_RETRY_MAX_MS = 60000;
+
 /**
  * Start ingesting ANNOTATION envelopes: bring the node up, subscribe, store incoming
  * annotations (dedup by id, tombstones applied on read), and flush any unsent ones.
+ * If the node can't start, retries with backoff and on AppState 'active'; after each
+ * successful start it re-flushes unsynced notes/blobs and re-runs the catch-up ladder.
  * No-op / resolves quietly if delivery isn't available or the phone isn't paired.
- * Returns an unsubscribe function.
+ * Returns an unsubscribe function (also cancels pending retries).
  */
 export async function startAnnotationReceive(): Promise<() => void> {
   if (!deliveryAvailable()) return () => {};
@@ -371,15 +380,42 @@ export async function startAnnotationReceive(): Promise<() => void> {
     void insert(e.a, true);
   });
 
-  try {
-    await ensureNode();
-    void resendUnsynced();
-    void replicatePending(); // push any on-device blobs the server doesn't have yet
-    catchupLadder();         // RBSR: reconcile the annotation log with peers (0/3/10/25s)
-  } catch {
-    /* node couldn't start — the listener stays registered for when it does */
-  }
-  return off;
+  let stopped = false;
+  let up = false;
+  let starting = false;
+  let delay = START_RETRY_MIN_MS;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const tryStart = async () => {
+    if (stopped || up || starting) return;
+    starting = true;
+    if (timer) { clearTimeout(timer); timer = null; }
+    try {
+      await ensureNode();
+      if (stopped) return;
+      up = true;
+      delay = START_RETRY_MIN_MS;
+      void resendUnsynced();
+      void replicatePending(); // push any on-device blobs the server doesn't have yet
+      catchupLadder();         // RBSR: reconcile the annotation log with peers (0/3/10/25s)
+    } catch {
+      // node couldn't start — the listener stays registered; retry with backoff
+      if (stopped) return;
+      timer = setTimeout(() => { void tryStart(); }, delay);
+      delay = Math.min(delay * 2, START_RETRY_MAX_MS);
+    } finally {
+      starting = false;
+    }
+  };
+  const appSub = AppState.addEventListener("change", (st) => {
+    if (st === "active") void tryStart();
+  });
+  await tryStart();
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    appSub.remove();
+    off();
+  };
 }
 
 // ---- React hook -------------------------------------------------------------
