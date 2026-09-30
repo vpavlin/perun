@@ -682,8 +682,10 @@ function Detail({ run, onChange, paired, onNeedPairing, onDelete }: {
           <Text style={styles.exportText}>🎬 Share video</Text>
         </Pressable>
       )}
-      <ReplayMode run={run} visible={replay} onClose={() => setReplay(false)} />
-      <ReplayVideo run={run} visible={replayVid} onClose={() => setReplayVid(false)} />
+      {/* Mounted only while open: RN's <Modal visible={false}> still renders its body,
+          so these ran their hooks (annotation loads, payload builds) on every Detail. */}
+      {replay && <ReplayMode run={run} visible onClose={() => setReplay(false)} />}
+      {replayVid && <ReplayVideo run={run} visible onClose={() => setReplayVid(false)} />}
 
       {/* Journey annotations: pinned notes/photos/voice on this run's route. Lives
           OUTSIDE the shot card so pins + the composer never leak into a shared image. */}

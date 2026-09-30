@@ -184,6 +184,11 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
     setEst(estimateDuration(annotations, pace));
     buildPayload(run, annotations, { w: ratio.w, h: ratio.h }, pace, basemap, watermark, photoMode, cardSize).then((p) => {
       if (alive) payloadRef.current = JSON.stringify(p);
+    }).catch((e) => {
+      // e.g. a photo/tile read failing — never leave the sheet stuck on "Preparing…"
+      if (!alive) return;
+      setErr(`couldn't prepare the video (${e instanceof Error ? e.message : String(e)})`);
+      setPhase("error");
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
