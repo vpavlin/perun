@@ -108,7 +108,7 @@ Item {
                 width: parent.width - 32
                 spacing: 12
 
-                Label {
+                Label { textFormat: Text.PlainText;
                     text: card.title
                     visible: card.title.length > 0
                     color: card.titleColor
@@ -117,7 +117,7 @@ Item {
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
                 }
-                Label {
+                Label { textFormat: Text.PlainText;
                     text: card.description
                     visible: card.description.length > 0
                     color: card.descColor
@@ -150,7 +150,7 @@ Item {
                     }
                 }
 
-                Label {
+                Label { textFormat: Text.PlainText;
                     text: card._err
                     visible: card._err.length > 0
                     color: card.errorColor; font.pixelSize: 12
@@ -166,7 +166,7 @@ Item {
             visible: card.showSaveButton && card._n > 0
             text: "Save as image"
             onClicked: card.saveImage()
-            contentItem: Text {
+            contentItem: Text { textFormat: Text.PlainText;
                 text: saveBtn.text; color: card.titleColor; font.pixelSize: 13
                 horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
             }
@@ -175,7 +175,7 @@ Item {
                 border.color: saveBtn.hovered ? card.accent : card.borderColor; border.width: 1
             }
         }
-        Label {
+        Label { textFormat: Text.PlainText;
             width: parent.width
             text: card._saveMsg
             visible: card._saveMsg.length > 0

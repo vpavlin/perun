@@ -316,18 +316,18 @@ Item {
         anchors.margins: Theme.spacing.large
         spacing: Theme.spacing.medium
 
-        LogosText {
+        LogosText { textFormat: Text.PlainText;
             text: "Perun — Analytics"
             color: Theme.palette.text
             font.pixelSize: 22
             font.weight: Theme.typography.weightMedium
         }
-        LogosText {
+        LogosText { textFormat: Text.PlainText;
             text: root.ready ? root.status : "Connecting to backend…"
             color: root.ready ? Theme.palette.success : Theme.palette.warning
             font.pixelSize: 13
         }
-        LogosText {
+        LogosText { textFormat: Text.PlainText;
             text: backend && backend.fingerprint ? ("Pairing: " + backend.fingerprint) : ""
             color: Theme.palette.textTertiary
             font.pixelSize: 11
@@ -338,7 +338,7 @@ Item {
         // peers=0 (amber) ⇒ node isn't meshed on the fleet (usual culprit behind NAT);
         // wireRx>0 but rxFrames=0 ⇒ frames arrive at the delivery node but don't surface
         // to the app; lastRx ⇒ how long since anything actually landed.
-        LogosText {
+        LogosText { textFormat: Text.PlainText;
             id: diagLine
             function d() { try { return JSON.parse(backend.diagJson || "{}"); } catch (e) { return {}; } }
             visible: backend && backend.diagJson && backend.diagJson.length > 2
@@ -392,7 +392,7 @@ Item {
                     border.width: root.showTrends ? 1 : 0
                     border.color: Theme.palette.primary
                     MouseArea { anchors.fill: parent; onClicked: root.showTrends = !root.showTrends }
-                    LogosText {
+                    LogosText { textFormat: Text.PlainText;
                         anchors.centerIn: parent
                         text: root.showTrends ? "‹ Back to runs" : "📊  Trends & totals"
                         color: root.showTrends ? Theme.palette.primary : Theme.palette.textSecondary
@@ -427,13 +427,13 @@ Item {
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 2
-                            LogosText {
+                            LogosText { textFormat: Text.PlainText;
                                 text: modelData.name || modelData.id
                                 color: Theme.palette.text; font.pixelSize: 15
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
-                            LogosText {
+                            LogosText { textFormat: Text.PlainText;
                                 text: root.fmtDist(modelData.summary ? modelData.summary.distanceM : 0)
                                       + "  ·  " + root.fmtDur(modelData.summary ? modelData.summary.durationS : 0)
                                       + (root.sportLine(modelData) ? "  ·  " + root.sportLine(modelData) : "")
@@ -442,7 +442,7 @@ Item {
                                 Layout.fillWidth: true
                             }
                         }
-                        LogosText {
+                        LogosText { textFormat: Text.PlainText;
                             text: root.fmtRate(modelData.summary ? modelData.summary.avgPaceSecPerKm : 0,
                                                root.sportInfo(modelData.sport).foot)
                             color: Theme.palette.textSecondary; font.pixelSize: 13
@@ -450,7 +450,7 @@ Item {
                         }
                     }
                 }
-                LogosText {
+                LogosText { textFormat: Text.PlainText;
                     anchors.centerIn: parent
                     visible: root.runs.length === 0
                     text: "No runs yet"
@@ -491,8 +491,8 @@ Item {
                         ] : []
                         delegate: ColumnLayout {
                             spacing: 2
-                            LogosText { text: modelData.k; color: Theme.palette.textTertiary; font.pixelSize: 11 }
-                            LogosText { text: modelData.v; color: Theme.palette.text; font.pixelSize: 16; font.weight: Theme.typography.weightMedium }
+                            LogosText { textFormat: Text.PlainText; text: modelData.k; color: Theme.palette.textTertiary; font.pixelSize: 11 }
+                            LogosText { textFormat: Text.PlainText; text: modelData.v; color: Theme.palette.text; font.pixelSize: 16; font.weight: Theme.typography.weightMedium }
                         }
                     }
                     Item { Layout.fillWidth: true }
@@ -710,7 +710,7 @@ Item {
                         color: Theme.palette.error
                         x: mapBox.endPt.x - 4; y: mapBox.endPt.y - 4
                     }
-                    LogosText {
+                    LogosText { textFormat: Text.PlainText;
                         anchors.centerIn: parent
                         visible: mapBox.routePts.length < 2
                         text: "no track"
@@ -738,7 +738,7 @@ Item {
                             border.width: 2
                             border.color: Theme.palette.primary
                             z: sel ? 2 : 1
-                            LogosText {
+                            LogosText { textFormat: Text.PlainText;
                                 anchors.centerIn: parent
                                 text: root.iconForKind(modelData.kind)
                                 font.pixelSize: parent.sel ? 12 : 10
@@ -760,7 +760,7 @@ Item {
                         color: "#8c0d1013"   // rgba(13,16,19,0.55)
                         width: attribLabel.implicitWidth + 8
                         height: attribLabel.implicitHeight + 4
-                        LogosText {
+                        LogosText { textFormat: Text.PlainText;
                             id: attribLabel
                             anchors.centerIn: parent
                             text: "© OpenStreetMap contributors"
@@ -822,19 +822,19 @@ Item {
                             anchors.fill: parent
                             anchors.margins: 12
                             spacing: 8
-                            LogosText {
+                            LogosText { textFormat: Text.PlainText;
                                 Layout.fillWidth: true
                                 text: root.fmtDist(root.headDist()) + "  ·  " + (root.trackPoints.length ? root.fmtDur((root.trackPoints[root.headIdx].t - root.trackPoints[0].t) / 1000) : "0:00")
                                 color: Theme.palette.text; font.pixelSize: 15; font.bold: true
                             }
-                            LogosText {
+                            LogosText { textFormat: Text.PlainText;
                                 Layout.fillWidth: true
                                 visible: root.trackPoints.length && root.trackPoints[root.headIdx].altValid
                                 text: "Elevation " + root.fmtElev(root.trackPoints.length ? root.trackPoints[root.headIdx].alt : 0)
                                 color: Theme.palette.textSecondary; font.pixelSize: 12
                             }
                             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.palette.borderHairline }
-                            LogosText {
+                            LogosText { textFormat: Text.PlainText;
                                 Layout.fillWidth: true
                                 text: replayPanel.fa
                                     ? (root.iconForKind(replayPanel.fa.kind) + "  " + (root.featGap <= root.featThreshold ? "● at this point" : ("at " + root.fmtDist(root.annDistance(replayPanel.fa)))))
@@ -855,7 +855,7 @@ Item {
                                 radius: Theme.spacing.radiusSmall
                                 color: Theme.palette.backgroundInset
                                 border.width: 1; border.color: Theme.palette.borderHairline
-                                LogosText {
+                                LogosText { textFormat: Text.PlainText;
                                     anchors.centerIn: parent
                                     text: "▶  Play voice note"
                                     color: Theme.palette.primary; font.pixelSize: 13
@@ -865,7 +865,7 @@ Item {
                                     onClicked: if (replayPanel.fa) root.playVoice(replayPanel.fa.blobId, replayPanel.fa.mime)
                                 }
                             }
-                            LogosText {
+                            LogosText { textFormat: Text.PlainText;
                                 Layout.fillWidth: true
                                 visible: replayPanel.fa && replayPanel.fa.text
                                 text: replayPanel.fa ? (replayPanel.fa.text || "") : ""
@@ -881,11 +881,11 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.topMargin: Theme.spacing.small
-                    LogosText {
+                    LogosText { textFormat: Text.PlainText;
                         text: "HIGHLIGHTS  ·  " + root.annotations.length
                         color: Theme.palette.textTertiary; font.pixelSize: 11
                     }
-                    LogosText {
+                    LogosText { textFormat: Text.PlainText;
                         Layout.leftMargin: 12
                         text: root.replayMode ? "◉ Exit replay" : "▶ Replay"
                         color: Theme.palette.primary; font.pixelSize: 12
@@ -894,7 +894,7 @@ Item {
                     }
                     Item { Layout.fillWidth: true }
                     // Desktop text authoring: pin a note to the run's start point.
-                    LogosText {
+                    LogosText { textFormat: Text.PlainText;
                         text: annCompose.visible ? "" : "+ Note"
                         color: Theme.palette.primary; font.pixelSize: 12
                         visible: root.ready && root.selectedRun !== null && !annCompose.visible
@@ -903,7 +903,7 @@ Item {
                 }
                 // Media hub: this module serves phone-captured photos/voice on the LAN.
                 // Show the URL so the user can set it as the phone's attachment server.
-                LogosText {
+                LogosText { textFormat: Text.PlainText;
                     Layout.fillWidth: true
                     visible: root.backend && root.backend.blobServerUrl && root.backend.blobServerUrl.length > 0
                     text: "📡 Media hub: " + (root.backend ? root.backend.blobServerUrl : "") + "  — set as the phone's attachment URL"
@@ -985,7 +985,7 @@ Item {
                                     anchors.fill: parent
                                     radius: Theme.spacing.radiusSmall
                                     color: Theme.palette.backgroundSecondary
-                                    LogosText {
+                                    LogosText { textFormat: Text.PlainText;
                                         anchors.centerIn: parent
                                         text: root.iconForKind(modelData.kind)
                                         font.pixelSize: 18
@@ -1014,7 +1014,7 @@ Item {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 2
-                                LogosText {
+                                LogosText { textFormat: Text.PlainText;
                                     Layout.fillWidth: true
                                     text: modelData.text && modelData.text.length > 0
                                           ? modelData.text
@@ -1023,7 +1023,7 @@ Item {
                                     color: Theme.palette.text; font.pixelSize: 13
                                     elide: Text.ElideRight
                                 }
-                                LogosText {
+                                LogosText { textFormat: Text.PlainText;
                                     text: {
                                         var d = new Date(modelData.t || modelData.createdAt || 0);
                                         var hh = d.getHours(), mm = d.getMinutes();
@@ -1056,7 +1056,7 @@ Item {
                 // ---- Elevation profile — altitude over cumulative distance,
                 //      matching the mobile ElevationChart (skips no-fix points,
                 //      light moving-average smoothing). ----
-                LogosText {
+                LogosText { textFormat: Text.PlainText;
                     visible: elevBox.hasData
                     text: "ELEVATION" + (root.selectedRun ? "  ·  +" + root.fmtElev(root.selectedRun.summary.elevGainM) : "")
                     color: Theme.palette.textTertiary; font.pixelSize: 11
@@ -1166,13 +1166,13 @@ Item {
                 // Splits header
                 RowLayout {
                     Layout.fillWidth: true
-                    LogosText { text: "KM"; color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.preferredWidth: 40 }
-                    LogosText {
+                    LogosText { textFormat: Text.PlainText; text: "KM"; color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.preferredWidth: 40 }
+                    LogosText { textFormat: Text.PlainText;
                         text: root.sportInfo(root.selectedRun ? root.selectedRun.sport : "").foot ? "PACE" : "SPEED"
                         color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.preferredWidth: 90
                     }
-                    LogosText { text: "ELEV"; color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.preferredWidth: 70 }
-                    LogosText { text: "HR"; color: Theme.palette.textTertiary; font.pixelSize: 11 }
+                    LogosText { textFormat: Text.PlainText; text: "ELEV"; color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.preferredWidth: 70 }
+                    LogosText { textFormat: Text.PlainText; text: "HR"; color: Theme.palette.textTertiary; font.pixelSize: 11 }
                     Item { Layout.fillWidth: true }
                 }
 
@@ -1184,14 +1184,14 @@ Item {
                     delegate: RowLayout {
                         width: ListView.view ? ListView.view.width : 0
                         height: 26
-                        LogosText { text: "" + modelData.index; color: Theme.palette.text; font.pixelSize: 13; Layout.preferredWidth: 40 }
-                        LogosText {
+                        LogosText { textFormat: Text.PlainText; text: "" + modelData.index; color: Theme.palette.text; font.pixelSize: 13; Layout.preferredWidth: 40 }
+                        LogosText { textFormat: Text.PlainText;
                             text: root.fmtRate(modelData.paceSecPerKm,
                                                root.sportInfo(root.selectedRun ? root.selectedRun.sport : "").foot)
                             color: Theme.palette.text; font.pixelSize: 13; Layout.preferredWidth: 90
                         }
-                        LogosText { text: "+" + root.fmtElev(modelData.elevGainM); color: Theme.palette.textSecondary; font.pixelSize: 13; Layout.preferredWidth: 70 }
-                        LogosText { text: modelData.avgHr > 0 ? Math.round(modelData.avgHr) : "—"; color: Theme.palette.textSecondary; font.pixelSize: 13; Layout.preferredWidth: 50 }
+                        LogosText { textFormat: Text.PlainText; text: "+" + root.fmtElev(modelData.elevGainM); color: Theme.palette.textSecondary; font.pixelSize: 13; Layout.preferredWidth: 70 }
+                        LogosText { textFormat: Text.PlainText; text: modelData.avgHr > 0 ? Math.round(modelData.avgHr) : "—"; color: Theme.palette.textSecondary; font.pixelSize: 13; Layout.preferredWidth: 50 }
                         Rectangle {
                             Layout.fillWidth: true
                             height: 10
@@ -1207,7 +1207,7 @@ Item {
                 }
             }
 
-            LogosText {
+            LogosText { textFormat: Text.PlainText;
                 anchors.centerIn: parent
                 visible: root.selectedRun === null && !root.showTrends
                 text: "Select a run to see its details"
@@ -1223,7 +1223,7 @@ Item {
                 spacing: Theme.spacing.medium
                 visible: root.showTrends
 
-                LogosText { text: "Trends"; color: Theme.palette.text; font.pixelSize: 20; font.weight: Theme.typography.weightMedium }
+                LogosText { textFormat: Text.PlainText; text: "Trends"; color: Theme.palette.text; font.pixelSize: 20; font.weight: Theme.typography.weightMedium }
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -1241,8 +1241,8 @@ Item {
                         }
                         delegate: ColumnLayout {
                             spacing: 2
-                            LogosText { text: modelData.k; color: Theme.palette.textTertiary; font.pixelSize: 11 }
-                            LogosText { text: modelData.v; color: Theme.palette.text; font.pixelSize: 20; font.weight: Theme.typography.weightMedium }
+                            LogosText { textFormat: Text.PlainText; text: modelData.k; color: Theme.palette.textTertiary; font.pixelSize: 11 }
+                            LogosText { textFormat: Text.PlainText; text: modelData.v; color: Theme.palette.text; font.pixelSize: 20; font.weight: Theme.typography.weightMedium }
                         }
                     }
                     Item { Layout.fillWidth: true }
@@ -1250,7 +1250,7 @@ Item {
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.palette.borderHairline }
 
-                LogosText { text: "WEEKLY DISTANCE  ·  last 12 weeks (km)"; color: Theme.palette.textTertiary; font.pixelSize: 11 }
+                LogosText { textFormat: Text.PlainText; text: "WEEKLY DISTANCE  ·  last 12 weeks (km)"; color: Theme.palette.textTertiary; font.pixelSize: 11 }
                 Rectangle {
                     id: weekBox
                     Layout.fillWidth: true
@@ -1298,7 +1298,7 @@ Item {
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.palette.borderHairline }
 
-                LogosText { text: "PERSONAL BESTS"; color: Theme.palette.textTertiary; font.pixelSize: 11 }
+                LogosText { textFormat: Text.PlainText; text: "PERSONAL BESTS"; color: Theme.palette.textTertiary; font.pixelSize: 11 }
                 Repeater {
                     model: {
                         var pb = root.personalBests(), rows = [];
@@ -1313,10 +1313,10 @@ Item {
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 1
-                            LogosText { text: modelData.k; color: Theme.palette.textSecondary; font.pixelSize: 13 }
-                            LogosText { text: modelData.sub; color: Theme.palette.textTertiary; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
+                            LogosText { textFormat: Text.PlainText; text: modelData.k; color: Theme.palette.textSecondary; font.pixelSize: 13 }
+                            LogosText { textFormat: Text.PlainText; text: modelData.sub; color: Theme.palette.textTertiary; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
                         }
-                        LogosText { text: modelData.v; color: Theme.palette.primary; font.pixelSize: 16; font.weight: Theme.typography.weightMedium }
+                        LogosText { textFormat: Text.PlainText; text: modelData.v; color: Theme.palette.primary; font.pixelSize: 16; font.weight: Theme.typography.weightMedium }
                     }
                 }
 
@@ -1384,13 +1384,13 @@ Item {
                     source: (photoView.url && photoView.url !== "error" && photoView.url !== "loading") ? photoView.url : ""
                     visible: status === Image.Ready
                 }
-                LogosText {
+                LogosText { textFormat: Text.PlainText;
                     anchors.centerIn: parent
                     visible: photoView.url === "" || photoView.url === "loading"
                     text: "loading photo…"
                     color: Theme.palette.textTertiary; font.pixelSize: 13
                 }
-                LogosText {
+                LogosText { textFormat: Text.PlainText;
                     anchors.centerIn: parent
                     visible: photoView.url === "error"
                     text: "Photo unavailable\n(blob server unreachable)"
@@ -1398,7 +1398,7 @@ Item {
                     color: Theme.palette.warning; font.pixelSize: 13
                 }
             }
-            LogosText {
+            LogosText { textFormat: Text.PlainText;
                 Layout.fillWidth: true
                 visible: photoView.ann && photoView.ann.text && photoView.ann.text.length > 0
                 text: photoView.ann ? (photoView.ann.text || "") : ""
@@ -1445,14 +1445,14 @@ Item {
             width: 320
             spacing: Theme.spacing.medium
 
-            LogosText {
+            LogosText { textFormat: Text.PlainText;
                 Layout.alignment: Qt.AlignHCenter
                 text: "Pair Perun"
                 color: Theme.palette.text
                 font.pixelSize: 16
                 font.weight: Theme.typography.weightMedium
             }
-            LogosText {
+            LogosText { textFormat: Text.PlainText;
                 Layout.alignment: Qt.AlignHCenter
                 text: "Scan with the Perun app to sync your runs privately"
                 color: Theme.palette.textSecondary
@@ -1488,7 +1488,7 @@ Item {
                         }
                     }
                 }
-                LogosText {
+                LogosText { textFormat: Text.PlainText;
                     anchors.centerIn: parent
                     visible: pairDialog.qrN === 0
                     text: "generating…"
@@ -1497,7 +1497,7 @@ Item {
                 }
             }
 
-            LogosText {
+            LogosText { textFormat: Text.PlainText;
                 Layout.alignment: Qt.AlignHCenter
                 text: root.backend ? ("Confirm these words match the app: " + root.backend.fingerprint) : ""
                 color: Theme.palette.textSecondary
@@ -1505,7 +1505,7 @@ Item {
             }
             // Fallback that never depends on the qr module: paste this link into
             // the Perun app's manual-pairing field.
-            LogosText {
+            LogosText { textFormat: Text.PlainText;
                 Layout.fillWidth: true
                 text: "Or paste this link into the Perun app:"
                 color: Theme.palette.textTertiary
