@@ -57,6 +57,20 @@ Item {
     onDescriptionChanged: regenerate()
     Component.onCompleted: if (payload.length > 0) regenerate()
 
+    // No blocking cross-module calls in a view: callModuleAsync when the host has it, else the old
+    // callModule deferred to the next event-loop turn. cb gets the raw result.
+    function callQr(method, args, cb) {
+        if (typeof logos.callModuleAsync === "function") {
+            try { logos.callModuleAsync("qr", method, args, function (r) { cb(r) }, 20000) }
+            catch (e) { Qt.callLater(function () { cb("") }) }
+            return
+        }
+        Qt.callLater(function () {
+            var r = ""
+            try { r = (typeof logos.callModule === "function") ? logos.callModule("qr", method, args) : "" } catch (e) {}
+            cb(r)
+        })
+    }
     // logos.callModule returns a double-JSON-encoded string; unwrap to an object.
     function callModuleParse(raw) {
         try { var v = JSON.parse(raw); if (typeof v === "string") v = JSON.parse(v); return v }
@@ -67,12 +81,16 @@ Item {
         _err = ""; _saveMsg = ""; _n = 0; _cells = []
         if (!payload || payload.length === 0) return
         if (typeof logos === "undefined") { _err = "Module bridge unavailable."; return }
-        var res = callModuleParse(logos.callModule("qr", "generateCard", [title, description, payload]))
-        if (!res || !res.ok) {
-            _err = (res && res.error) ? res.error : "QR service unavailable — is the 'qr' module installed?"
-            return
-        }
-        _n = res.n; _cells = res.cells
+        var want = payload
+        callQr("generateCard", [title, description, payload], function (raw) {
+            if (payload !== want) return                 // a newer payload replaced this one
+            var res = callModuleParse(raw)
+            if (!res || !res.ok) {
+                _err = (res && res.error) ? res.error : "QR service unavailable — is the 'qr' module installed?"
+                return
+            }
+            _n = res.n; _cells = res.cells
+        })
     }
 
     // Grab the card (title + description + QR — NOT the Save button) and save via qr core.
@@ -83,9 +101,11 @@ Item {
         var tmp  = "/tmp/" + name + ".png"
         captureCard.grabToImage(function(result) {
             if (!result.saveToFile(tmp)) { card._saveOk = false; card._saveMsg = "Could not capture image."; return }
-            var res = card.callModuleParse(logos.callModule("qr", "savePng", [tmp, name]))
-            if (res && res.ok) { card._saveOk = true;  card._saveMsg = "Saved: " + res.path }
-            else               { card._saveOk = false; card._saveMsg = "Save failed: " + (res && res.error ? res.error : "?") }
+            card.callQr("savePng", [tmp, name], function (raw) {
+                var res = card.callModuleParse(raw)
+                if (res && res.ok) { card._saveOk = true;  card._saveMsg = "Saved: " + res.path }
+                else               { card._saveOk = false; card._saveMsg = "Save failed: " + (res && res.error ? res.error : "?") }
+            })
         })
     }
 
