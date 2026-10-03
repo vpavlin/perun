@@ -2,13 +2,9 @@
   description = "Perun Core — headless Logos engine+sync module (identity, Delivery transport, run+annotation fold, media hub). The always-on hub AND the perun_analytics view's backend.";
 
   inputs = {
-    # Same shape as kym_core/scala: the core rides the loam_core FACADE (not
-    # delivery_module directly) — sealed bytes move through loam_core, which owns the
-    # delivery node (+ future ble_mesh) and SDS Reliable Channels. One module-builder
-    # across all of them (loam_core's delivery follows it too) = one SDK ABI.
-    loam_core.url = "path:/home/vpavlin/loam-basecamp/core";
-    logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.6";
-    loam_core.inputs.logos-module-builder.follows = "logos-module-builder";
+    # port/0.3: builder 0.3.1; perun_core rides the loam_core facade on UPSTREAM delivery v0.3.0.
+    logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.1";
+    loam_core.url = "github:vpavlin/loam-basecamp/553253fee586baeb16d84c77e3f6da543ba7de9b?dir=core";
   };
 
   # mkLogosModule (not mkLogosQmlModule): a headless core module — no QML view. The
