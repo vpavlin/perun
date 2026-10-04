@@ -1,13 +1,15 @@
-// "Share video" — render a run's Replay to a shareable WebM, fully offline.
+// "Share video" — render a run's Replay to a shareable MP4, fully offline.
 //
 // The renderer (lib/replayVideoHtml) runs in a WebView: it draws the run on a canvas
 // (cinematic black-BG "route draws itself") and records it with MediaRecorder. We assemble
 // the run payload (track points + annotations + LOCAL photos embedded as data URIs — no
 // network, no map tiles), hand it to the WebView after its "ready", stream progress, then
-// write the returned WebM to a file and open the share sheet.
+// write the returned WebM to a file, re-encode it to MP4 (H.264, hardware encoder — several
+// times smaller and accepted by WhatsApp/Instagram) and open the share sheet. If the phone
+// can't transcode, the WebM is kept and shared as before.
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Alert, Dimensions, Modal, PanResponder, Pressable, ScrollView, StatusBar, StyleSheet, Text, View,
+  Alert, Dimensions, Modal, NativeModules, PanResponder, Pressable, ScrollView, StatusBar, StyleSheet, Text, View,
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { File, Directory, Paths } from "expo-file-system";
@@ -20,6 +22,17 @@ import { localBlobUri, readFileBytes } from "../lib/blob";
 import { replayVideoHtml } from "../lib/replayVideoHtml";
 import { getVideoPhotoPrefs, setVideoPhotoPrefs } from "../lib/settings";
 import { theme } from "../theme";
+
+// Native WebM → MP4 transcoder (native/videotranscode, Media3 Transformer).
+const PerunVideo = (NativeModules as any).PerunVideo as
+  | { toMp4(inUri: string, outUri: string, bitrate: number): Promise<{ uri: string; bytes: number; ms: number }> }
+  | undefined;
+
+/** H.264 target bitrate for a frame — the replay is mostly flat black, so ~2 Mbit/s at 900 px
+ *  looks clean (the WebM source is recorded at up to 6.5 Mbit/s so the re-encode has detail). */
+function mp4Bitrate(w: number, h: number): number {
+  return Math.min(3_000_000, Math.round(2_000_000 * (Math.max(w, h) / 900)));
+}
 
 /** Persistent store for rendered clips (survives, re-shareable) — filename encodes the run,
  *  ratio and a timestamp, so nothing is overwritten. */
@@ -35,7 +48,7 @@ function listSaved(runSafe: string): Saved[] {
       .filter((e): e is File => e instanceof File && e.name.startsWith(`perun__${runSafe}__`))
       .map((f) => ({
         name: f.name, uri: f.uri, size: (f as { size?: number }).size ?? 0,
-        ratio: f.name.replace(/\.webm$/, "").split("__")[2] || "",
+        ratio: f.name.replace(/\.(webm|mp4)$/, "").split("__")[2] || "",
       }))
       .sort((a, b) => (a.name < b.name ? 1 : -1)); // newest first (name embeds the ts)
   } catch {
@@ -46,7 +59,7 @@ const BASE_TRAVEL = 12; // seconds of cruise across the whole route at pace 1.0
 const PACE = { min: 0.6, max: 2.4 }; // higher = faster = shorter clip
 
 // prep = building/prepping; ready = prepared, waiting for Start; then rendering → saving.
-type Phase = "prep" | "ready" | "rendering" | "saving" | "done" | "error" | "unsupported";
+type Phase = "prep" | "ready" | "rendering" | "saving" | "compressing" | "done" | "error" | "unsupported";
 
 /** Estimated clip length (s) for a pace — matches the renderer's schedule formula. */
 function estimateDuration(annotations: Annotation[], pace: number): number {
@@ -154,6 +167,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   const [est, setEst] = useState(0);           // accurate estimate from the renderer
   const [basemap, setBasemap] = useState<string>("none");
   const [sizeMb, setSizeMb] = useState(0);
+  const [format, setFormat] = useState("MP4");
   const [wmOn, setWmOn] = useState(true);   // optional Perun-logo watermark (default on)
   const [logoUri, setLogoUri] = useState("");
   useEffect(() => { perunLogoDataUri().then(setLogoUri); }, []);
@@ -200,11 +214,35 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
       const bytes = toByteArray(b64);
       setSizeMb(+(bytes.length / 1048576).toFixed(1));
       // Persist to the Perun videos dir (kept + re-shareable), a unique name per render.
-      const file = new File(videosDir(), `perun__${runSafe}__${ratioKey}__${Date.now()}.webm`);
-      file.write(bytes);
+      const base = `perun__${runSafe}__${ratioKey}__${Date.now()}`;
+      let uri: string;
+      if (PerunVideo) {
+        const tmp = new File(Paths.cache, `${base}.webm`);
+        tmp.write(bytes);
+        setPhase("compressing");
+        try {
+          const out = new File(videosDir(), `${base}.mp4`);
+          const r = await PerunVideo.toMp4(tmp.uri, out.uri, mp4Bitrate(ratio.w, ratio.h));
+          setSizeMb(+(r.bytes / 1048576).toFixed(1));
+          setFormat("MP4");
+          uri = r.uri;
+        } catch {
+          // No usable encoder on this phone — keep the WebM rather than lose the render.
+          const file = new File(videosDir(), `${base}.webm`);
+          tmp.copy(file);
+          setFormat("WebM");
+          uri = file.uri;
+        }
+        try { if (tmp.exists) tmp.delete(); } catch { /* ignore */ }
+      } else {
+        const file = new File(videosDir(), `${base}.webm`);
+        file.write(bytes);
+        setFormat("WebM");
+        uri = file.uri;
+      }
       refreshSaved();
       setPhase("done");
-      await shareSaved(file.uri);
+      await shareSaved(uri);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
       setPhase("error");
@@ -213,7 +251,7 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
 
   const shareSaved = async (uri: string) => {
     if (!(await Sharing.isAvailableAsync())) { Alert.alert("Saved", `Video is stored at:\n${uri}`); return; }
-    await Sharing.shareAsync(uri, { mimeType: "video/webm", dialogTitle: `${run.name} — Replay` });
+    await Sharing.shareAsync(uri, { mimeType: uri.endsWith(".mp4") ? "video/mp4" : "video/webm", dialogTitle: `${run.name} — Replay` });
   };
   const deleteSaved = (v: Saved) => {
     Alert.alert("Delete video?", `${(v.size / 1048576).toFixed(1)} MB clip`, [
@@ -293,14 +331,15 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
   const scale = Math.min(availW / ratio.w, availH / ratio.h);
   const sw = Math.round(ratio.w * scale);
   const sh = Math.round(ratio.h * scale);
-  const busy = phase === "rendering" || phase === "saving";
+  const busy = phase === "rendering" || phase === "saving" || phase === "compressing";
 
   const label =
     phase === "prep" ? "Preparing…"
     : phase === "ready" ? `Ready · ~${Math.round(est)}s`
     : phase === "rendering" ? `Rendering… ${Math.round(progress * 100)}%`
-    : phase === "saving" ? `Saving + sharing… (${sizeMb} MB)`
-    : phase === "done" ? `Shared ✓ · ${sizeMb} MB WebM`
+    : phase === "saving" ? `Saving… (${sizeMb} MB)`
+    : phase === "compressing" ? `Compressing to MP4… (${sizeMb} MB WebM)`
+    : phase === "done" ? `Shared ✓ · ${sizeMb} MB ${format}`
     : phase === "unsupported" ? "This device's WebView can't record video"
     : phase === "error" ? `Failed: ${err}`
     : "";
@@ -435,8 +474,8 @@ export function ReplayVideo({ run, visible, onClose }: { run: Run; visible: bool
             </Pressable>
           ) : (
             <Pressable
-              style={[styles.btn, styles.btnPrimary, (phase === "prep" || phase === "saving") && styles.btnDisabled]}
-              disabled={phase === "prep" || phase === "saving"}
+              style={[styles.btn, styles.btnPrimary, (phase === "prep" || phase === "saving" || phase === "compressing") && styles.btnDisabled]}
+              disabled={phase === "prep" || phase === "saving" || phase === "compressing"}
               onPress={startRender}
             >
               <Text style={styles.btnPrimaryText}>{phase === "done" ? "● Render again" : "● Start render"}</Text>
