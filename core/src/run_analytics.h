@@ -5,6 +5,7 @@
 // track_codec.h. This is the "detailed analytics" the module adds on top of a
 // raw track: the phone captures points, the module turns them into insight.
 //
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -67,6 +68,31 @@ struct ElevAccumulator {
     return 0.0;
   }
 };
+
+// Altitude JUMPS (the fused location switching sources) defeat the 5 m floor: each jump of tens of
+// metres counts as a climb. Mirror of cleanAltitudes() in mobile/src/lib/analytics.ts (keep them in
+// step): each valid altitude becomes the MEDIAN of the valid altitudes within ±20 s (lower middle for
+// an even count). Returns a copy of the points with the cleaned altitudes.
+constexpr int64_t kAltMedianWindowMs = 20000;
+inline std::vector<GeoPoint> cleanAltitudes(const std::vector<GeoPoint> &points) {
+  std::vector<GeoPoint> out = points;
+  std::vector<size_t> idx;
+  for (size_t i = 0; i < points.size(); ++i)
+    if (points[i].altValid && std::isfinite(points[i].alt)) idx.push_back(i);
+  size_t lo = 0, hi = 0;
+  std::vector<double> w;
+  for (size_t k = 0; k < idx.size(); ++k) {
+    const int64_t t = points[idx[k]].t;
+    while (points[idx[lo]].t < t - kAltMedianWindowMs) ++lo;
+    if (hi < k) hi = k;
+    while (hi + 1 < idx.size() && points[idx[hi + 1]].t <= t + kAltMedianWindowMs) ++hi;
+    w.clear();
+    for (size_t m = lo; m <= hi; ++m) w.push_back(points[idx[m]].alt);
+    std::sort(w.begin(), w.end());
+    out[idx[k]].alt = w[(w.size() - 1) / 2];
+  }
+  return out;
+}
 } // namespace detail
 
 inline RunSummary computeSummary(const Track &tr) {
@@ -79,14 +105,15 @@ inline RunSummary computeSummary(const Track &tr) {
   int hrCount = 0;
   int64_t movingMs = 0;
   detail::ElevAccumulator elev;
-  if (tr.hasAlt) elev.add(p[0]); // seed the trough from the first fix
+  const std::vector<GeoPoint> alt = tr.hasAlt ? detail::cleanAltitudes(p) : std::vector<GeoPoint>();
+  if (tr.hasAlt) elev.add(alt[0]); // seed the trough from the first fix
   for (size_t i = 1; i < p.size(); ++i) {
     // Skip the pair spanning a pause: no distance covered by the activity, and
     // the wall time in between is not moving time.
     if (!p[i].brk) {
       s.distanceM += detail::haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
       movingMs += p[i].t - p[i - 1].t;
-      if (tr.hasAlt) s.elevGainM += elev.add(p[i]);
+      if (tr.hasAlt) s.elevGainM += elev.add(alt[i]);
     } else if (tr.hasAlt) {
       elev.reset(); // don't bridge an ascent across a pause/teleport
     }
@@ -116,7 +143,8 @@ inline std::vector<Split> computeSplits(const Track &tr, double splitMeters = 10
   // One accumulator for the whole track (trough reference carries across km
   // boundaries); committed ascent lands in whichever split it happened in.
   detail::ElevAccumulator elev;
-  if (tr.hasAlt) elev.add(p[0]);
+  const std::vector<GeoPoint> alt = tr.hasAlt ? detail::cleanAltitudes(p) : std::vector<GeoPoint>();
+  if (tr.hasAlt) elev.add(alt[0]);
 
   auto close = [&]() {
     Split sp;
@@ -133,7 +161,7 @@ inline std::vector<Split> computeSplits(const Track &tr, double splitMeters = 10
     if (!p[i].brk) {
       splitDist += detail::haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
       splitMs += p[i].t - p[i - 1].t;
-      if (tr.hasAlt) splitElev += elev.add(p[i]);
+      if (tr.hasAlt) splitElev += elev.add(alt[i]);
     } else if (tr.hasAlt) {
       elev.reset();
     }
