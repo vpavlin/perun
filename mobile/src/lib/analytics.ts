@@ -23,6 +23,35 @@ export function haversine(lat1: number, lon1: number, lat2: number, lon2: number
 // altitude entirely, and only commits a rise once it clears a noise threshold
 // measured from the last local trough (the standard way to score GPS ascent).
 const ELEV_THRESHOLD_M = 5;
+
+// Altitude JUMPS are a second, worse problem than jitter: the phone's fused location switches
+// between sources (GNSS, network, barometer-assisted) and the reported altitude jumps by tens of
+// metres and back, over and over. Each jump clears the 5 m threshold, so a 51 m-range walk read
+// as +584 m. cleanAltitudes() replaces each reading by the MEDIAN of the readings within
+// ±ALT_MEDIAN_WINDOW_MS: a wrong source can't win unless it supplies most of the readings, and
+// ordinary jitter is smoothed too. Points without altitude stay without. Mirrored in core
+// run_analytics.h (same window, same tie rule: lower middle for an even count).
+const ALT_MEDIAN_WINDOW_MS = 20_000;
+export function cleanAltitudes(points: GeoPoint[]): (number | undefined)[] {
+  const idx: number[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i].alt;
+    if (a != null && Number.isFinite(a)) idx.push(i);
+  }
+  const out: (number | undefined)[] = new Array(points.length).fill(undefined);
+  let lo = 0, hi = 0;
+  for (let k = 0; k < idx.length; k++) {
+    const t = points[idx[k]].t;
+    while (points[idx[lo]].t < t - ALT_MEDIAN_WINDOW_MS) lo++;
+    if (hi < k) hi = k;
+    while (hi + 1 < idx.length && points[idx[hi + 1]].t <= t + ALT_MEDIAN_WINDOW_MS) hi++;
+    const w: number[] = [];
+    for (let m = lo; m <= hi; m++) w.push(points[idx[m]].alt as number);
+    w.sort((x, y) => x - y);
+    out[idx[k]] = w[(w.length - 1) >> 1];
+  }
+  return out;
+}
 function makeElevAccumulator() {
   let ref: number | null = null; // last committed peak / running trough
   return {
@@ -50,7 +79,8 @@ export function computeSummary(tr: Track): RunSummary {
   let hrSum = 0, hrN = 0;
   let movingMs = 0;
   const elev = makeElevAccumulator();
-  if (tr.hasAlt) elev.add(p[0].alt); // seed the trough from the first fix
+  const alt = tr.hasAlt ? cleanAltitudes(p) : [];
+  if (tr.hasAlt) elev.add(alt[0]); // seed the trough from the first fix
   for (let i = 1; i < p.length; i++) {
     // A break means the pair (i-1, i) spans a pause: no distance was covered
     // *by the activity*, and the wall time in between isn't moving time.
@@ -58,7 +88,7 @@ export function computeSummary(tr: Track): RunSummary {
     if (!p[i].brk) {
       s.distanceM += haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
       movingMs += p[i].t - p[i - 1].t;
-      if (tr.hasAlt) s.elevGainM += elev.add(p[i].alt);
+      if (tr.hasAlt) s.elevGainM += elev.add(alt[i]);
     } else if (tr.hasAlt) {
       elev.reset(); // don't bridge an ascent across a pause/teleport
     }
@@ -84,7 +114,8 @@ export function computeSplits(tr: Track, splitMeters = 1000): Split[] {
   // One accumulator for the whole track (so the trough reference carries across
   // km boundaries); committed ascent lands in whichever split it happened in.
   const elev = makeElevAccumulator();
-  if (tr.hasAlt) elev.add(p[0].alt);
+  const alt = tr.hasAlt ? cleanAltitudes(p) : [];
+  if (tr.hasAlt) elev.add(alt[0]);
   const close = () => {
     const dur = splitMs / 1000;
     splits.push({
@@ -100,7 +131,7 @@ export function computeSplits(tr: Track, splitMeters = 1000): Split[] {
     if (!p[i].brk) {
       splitDist += haversine(p[i - 1].lat, p[i - 1].lon, p[i].lat, p[i].lon);
       splitMs += p[i].t - p[i - 1].t;
-      if (tr.hasAlt) splitElev += elev.add(p[i].alt);
+      if (tr.hasAlt) splitElev += elev.add(alt[i]);
     } else if (tr.hasAlt) {
       elev.reset();
     }

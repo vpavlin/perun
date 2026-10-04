@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import Svg, { Polyline, Line } from "react-native-svg";
 import { GeoPoint } from "../lib/types";
-import { haversine } from "../lib/analytics";
+import { haversine, cleanAltitudes } from "../lib/analytics";
 import { theme } from "../theme";
 
 export function ElevationChart({
@@ -46,12 +46,13 @@ export function ElevationChart({
 
   // (cumulativeDistanceM, altM) series, skipping points with no altitude fix.
   const raw: { d: number; a: number }[] = [];
+  const clean = cleanAltitudes(points);   // same jump rejection as the gain figure
   let dist = 0;
   for (let i = 0; i < points.length; i++) {
     if (i > 0 && !points[i].brk) {
       dist += haversine(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon);
     }
-    if (points[i].alt != null && Number.isFinite(points[i].alt)) raw.push({ d: dist, a: points[i].alt! });
+    if (clean[i] != null) raw.push({ d: dist, a: clean[i]! });
   }
 
   // Light centred moving average — raw GPS altitude is jittery enough that the
