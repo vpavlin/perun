@@ -4,9 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Perun</title>
-<meta name="description" content="Privacy-first GPS run &amp; ride tracker. Local-first, syncs peer-to-peer to your Basecamp desktop over Logos. Your routes stay yours — guarded like the Dark Forest.">
-<link rel="icon" href="logo.png">
+<title>Perun: private run &amp; ride tracker for Android and Basecamp</title>
+<meta name="description" content="Perun is a private GPS tracker for running, hiking and cycling. It runs on Android and Basecamp (desktop) and syncs peer-to-peer over Logos, sealed with a key only your paired devices hold. No account, no server.">
+<link rel="canonical" href="https://perun.vpavlin.xyz/">
+<link rel="icon" type="image/png" href="logo.png">
+<link rel="apple-touch-icon" href="logo.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Perun">
+<meta property="og:title" content="Perun: run unseen">
+<meta property="og:description" content="A private GPS tracker for runs and rides on Android and Basecamp. Pair once, sync peer-to-peer over Logos, no account, no server.">
+<meta property="og:url" content="https://perun.vpavlin.xyz/">
+<meta property="og:image" content="https://perun.vpavlin.xyz/logo.png">
+<meta property="og:image:alt" content="Perun logo: a running Slavic thunder-god">
+<meta name="twitter:card" content="summary">
 <style>
   /* Palette lifted 1:1 from the app's theme.ts so phone, desktop and web are one product. */
   :root{
@@ -185,6 +195,62 @@
   .fine a{color:var(--text-2); text-decoration:none} .fine a:hover{color:var(--primary)}
   svg{display:block}
   @media (prefers-reduced-motion: reduce){ *{animation:none !important} html{scroll-behavior:auto} }
+
+  /* ---------- 2026-10 refresh additions ---------- */
+  .hero .grid{grid-template-columns:1.15fr .85fr}
+  @media(max-width:820px){ .hero .grid{grid-template-columns:1fr} }
+  .reel{position:relative; justify-self:center; width:min(300px,70vw)}
+  .reel video,.reel img{display:block; width:100%; height:auto; aspect-ratio:9/16; object-fit:cover;
+    border-radius:22px; border:1px solid var(--border); background:#07090b; box-shadow:0 22px 60px rgba(0,0,0,.6)}
+  .reel::after{content:""; position:absolute; inset:-14%; z-index:-1; border-radius:50%;
+    background:radial-gradient(closest-side, rgba(240,136,62,.20), transparent 72%)}
+  .reel figcaption{margin-top:10px; font-family:var(--mono); font-size:.68rem; color:var(--text-3); text-align:center}
+  .hero .plain{margin-top:16px; color:var(--text); max-width:46ch; font-size:1rem}
+  @media(max-width:820px){ .hero .plain{margin-inline:auto} }
+
+  /* gallery */
+  .gallery{display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:16px; margin-top:30px}
+  .gallery figure{margin:0; border:1px solid var(--border); border-radius:14px; background:var(--card); padding:10px}
+  .gallery figure img{display:block; width:100%; height:auto; border-radius:9px; background:#07090b}
+  .gallery figure.wide{grid-column:span 2}
+  @media(max-width:420px){ .gallery figure.wide{grid-column:auto} }
+  .gallery figcaption{font-size:.8rem; color:var(--text-2); margin:9px 2px 2px}
+
+  /* preview tag on the film widget */
+  .tag{display:inline-block; font-family:var(--mono); font-size:.62rem; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--primary-2); border:1px dashed var(--primary); border-radius:6px; padding:3px 8px; margin-left:8px; vertical-align:middle}
+  .stage-wrap{position:relative; flex-direction:column}
+  .stage-note{margin-top:10px; font-family:var(--mono); font-size:.66rem; color:var(--text-3); text-align:center}
+
+  /* privacy */
+  .priv{display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-top:30px}
+  @media(max-width:760px){ .priv{grid-template-columns:1fr} }
+  .priv .col ul{margin:10px 0 0; padding-left:18px; color:var(--text-2); font-size:.93rem}
+  .priv .col li{margin:6px 0}
+  .priv .col li b{color:var(--text); font-weight:600}
+  .fp{display:flex; gap:8px; flex-wrap:wrap; margin:12px 0 4px}
+  .fp span{font-family:var(--mono); font-size:.8rem; color:var(--text); background:var(--bg); border:1px solid var(--border);
+    border-radius:8px; padding:6px 10px}
+
+  /* install extras */
+  .qrrow{display:flex; gap:16px; align-items:center; margin-top:14px; flex-wrap:wrap}
+  .qrrow img{width:132px; height:132px; border-radius:10px; background:#fff; padding:6px; flex:0 0 auto}
+  .qrrow .fpr{font-family:var(--mono); font-size:.66rem; color:var(--text-3); word-break:break-all; min-width:0; flex:1 1 160px}
+  .col ol{margin:6px 0 0; padding-left:20px; color:var(--text-2); font-size:.92rem}
+  .col ol li{margin:5px 0}
+  .col ol b,.col p b{color:var(--text); font-weight:600}
+  .code.wrap{white-space:normal; word-break:break-all}
+
+  /* status */
+  .status ul{margin:24px 0 0; padding:0; list-style:none; display:grid; gap:10px; max-width:780px}
+  .status li{border:1px solid var(--border); border-radius:12px; background:var(--card); padding:13px 16px; color:var(--text-2); font-size:.93rem}
+  .status li b{color:var(--text)}
+  .status .ver{margin-top:18px; font-family:var(--mono); font-size:.74rem; color:var(--text-3)}
+
+  .col{min-width:0}
+  .section h2{line-height:1.1}
+  footer .sibs{margin-top:14px; font-size:.86rem}
+  footer .sibs a{margin-right:14px}
 </style>
 </head>
 <body>
@@ -194,9 +260,10 @@
     <img class="mark" src="logo.png" alt="">
     <b>Perun</b>
     <nav>
+      <a href="#track">Features</a>
+      <a href="#screens">Screens</a>
+      <a href="#privacy">Privacy</a>
       <a href="#myth">Myth</a>
-      <a href="#track">Track</a>
-      <a href="#film">Films</a>
       <a href="#get">Get&nbsp;it</a>
       <a href="https://github.com/vpavlin/perun">Source</a>
     </nav>
@@ -209,43 +276,25 @@
     <div>
       <span class="eyebrow">Slavic thunder · privacy-first</span>
       <h1>RUN<br><span class="u">UNSEEN.</span></h1>
-      <p class="lede">Your runs, routes and rides — hidden as the secrets of an ancient, mystical forest.</p>
-      <p class="sub">A GPS tracker for running and cycling that keeps every trace on <em>your</em> devices, and syncs peer-to-peer to your desktop over Logos. No account. No servers. No prying eyes.</p>
+      <p class="lede">Your runs, routes and rides, hidden as the secrets of an ancient forest.</p>
+      <p class="plain"><b>Perun is a private GPS tracker for running, hiking and cycling.</b> It runs on Android and on Basecamp (desktop), and the two sync directly over Logos: no account and no server of ours in between.</p>
       <div class="cta">
         <a class="btn primary" href="#get">Get&nbsp;the&nbsp;app
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </a>
-        <a class="btn ghost" href="#film">See a ride film</a>
+        <a class="btn ghost" href="#privacy">How pairing works</a>
       </div>
       <div class="badges">
-        <span><b>Local-first.</b> Offline by design.</span>
+        <span><b>Local-first.</b> Records offline.</span>
         <span><b>Open source.</b> Yours to audit.</span>
-        <span><b>No cloud.</b> Ever.</span>
+        <span><b>No account.</b> Pair, don't sign up.</span>
       </div>
     </div>
-    <div class="emblem">
-      <img src="logo.png" alt="Perun — a running Slavic thunder-god">
-    </div>
-  </div>
-</section>
-
-<!-- MYTH -->
-<section class="myth section" id="myth">
-  <div class="wrap grid">
-    <div>
-      <span class="eyebrow">The myth</span>
-      <blockquote>What is yours should stay yours — and what comes for it should be met with <span class="p">thunder</span>.</blockquote>
-      <svg class="bolt" viewBox="0 0 120 260" fill="none" aria-hidden="true">
-        <path d="M70 4 L26 140 L60 140 L44 256 L104 108 L66 108 Z" fill="#f0883e" opacity=".16"/>
-        <path d="M70 4 L26 140 L60 140 L44 256 L104 108 L66 108 Z" stroke="#f0883e" stroke-width="2" stroke-linejoin="round"/>
-      </svg>
-    </div>
-    <div>
-      <p>Perun is the Slavic god of thunder and the storm — sky-father, lord of the sacred oak, keeper of order. He rides the heavens in a chariot of fire, and in his hand is the axe of lightning that always returns to him once thrown.</p>
-      <p>His eternal adversary is <b>Veles</b>, the horned serpent who lives among the roots of the world. Veles slips up from the dark to steal — cattle, waters, people — and drag them down to hoard where no light reaches. Each time, Perun hunts him across the sky and strikes, splitting oak and stone, until what was taken is returned. Then the rain falls, and the world is set right.</p>
-      <p>It is an old story about a simple idea, and it stands guard over the <b>Dark Forest</b> — the deep, unmapped place where a thing can stay hidden and safe.</p>
-      <p class="turn">Today the serpent wears a different face. Modern trackers take your movements, your routes, your home, and hoard them in databases you will never see. <b>Perun takes the old bargain back.</b> Your runs stay in the open sky of your own devices — struck through with lightning the moment anyone reaches for them.</p>
-    </div>
+    <figure class="reel">
+      <video src="assets/replay.mp4" poster="assets/replay-poster.jpg" autoplay muted loop playsinline preload="metadata"
+        aria-label="A Perun replay video: the route draws itself over a satellite map of Prague while a photo annotation appears"></video>
+      <figcaption>A real replay video exported from the app</figcaption>
+    </figure>
   </div>
 </section>
 
@@ -254,48 +303,64 @@
   <div class="wrap">
     <span class="eyebrow">What it does</span>
     <h2>Record the run. Keep the run.</h2>
-    <p class="intro">Live map, splits, pace and elevation — the detail you want from a tracker, without the surveillance you didn't ask for.</p>
+    <p class="intro">Live map, splits, pace and elevation: the detail you want from a tracker, without handing your movements to anyone.</p>
     <div class="feat">
       <div class="tile">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
-        <h3>Run &amp; ride</h3>
-        <p>Live GPS with a map that draws itself, and a full breakdown after — distance, splits, pace, elevation. Runs and bike rides alike.</p>
-      </div>
-      <div class="tile">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-        <h3>Private by default</h3>
-        <p>Every track stays on your phone and your paired devices. Nothing is uploaded to a third party. There is no account to make.</p>
-      </div>
-      <div class="tile">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12a8 8 0 0 1 8-8M20 12a8 8 0 0 1-8 8"/><circle cx="12" cy="12" r="2.5"/><path d="M12 4v3M12 17v3"/></svg>
-        <h3>Sync over Logos</h3>
-        <p>Runs travel peer-to-peer over Waku to the <b style="color:var(--text)">Perun Analytics</b> module on your Basecamp desktop — a bigger screen for splits and history, still no server in the middle.</p>
+        <h3>Run, hike &amp; ride</h3>
+        <p>Run, trail, walk, hike, ride and MTB. Live map, per-km splits, pace and elevation, with auto-pause at red lights. Recording continues with the screen off. A rolling median filter removes GPS altitude spikes, so elevation gain is believable.</p>
       </div>
       <div class="tile">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2.5"/><path d="M3 15l4-3 3 2 4-4 7 6"/></svg>
         <h3>Annotate the route</h3>
-        <p>Drop photos along the way as you go. Each becomes a waypoint on the map — and a frame in your ride film.</p>
+        <p>Pin a <b style="color:var(--text)">text note, photo or voice note</b> to a point on the run, then edit or delete it later. Annotations sync to Basecamp, where you can see the photos and play the voice notes.</p>
       </div>
       <div class="tile">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/></svg>
-        <h3>Works offline</h3>
-        <p>Out of signal in the hills? It records anyway and reconciles later. Local-first isn't a setting — it's the whole design.</p>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="14" height="14" rx="2"/><path d="M17 10l4-2.5v9L17 14"/></svg>
+        <h3>Replay &amp; video</h3>
+        <p>Scrub a replay along the route, or export an <b style="color:var(--text)">MP4 replay video</b> (hardware H.264) in 1:1, 16:9 or 9:16. Your photos and voice notes appear in it. It is rendered on the phone, with no upload.</p>
       </div>
       <div class="tile">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 18l-5-6 5-6M16 6l5 6-5 6M13 4l-2 16"/></svg>
-        <h3>Open source</h3>
-        <p>Built in the open on the Logos stack. Read the code, build it yourself, verify the privacy claims for real.</p>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>
+        <h3>GPX &amp; image export</h3>
+        <p>Export any run as standard GPX (with its sport type) for Strava, Garmin or your own archive. You can also share a summary image, and hide the map first if you don't want to reveal where you were.</p>
+      </div>
+      <div class="tile">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M7 13l3-3 2 2 4-4"/></svg>
+        <h3>Analytics on the desktop</h3>
+        <p><b style="color:var(--text)">Perun Analytics</b> on Basecamp gives a bigger screen for every synced run: splits, elevation, route map, annotations and replay, plus trends, weekly distance and personal bests. You can export GPX or save an image from there too.</p>
+      </div>
+      <div class="tile">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12a8 8 0 0 1 8-8M20 12a8 8 0 0 1-8 8"/><circle cx="12" cy="12" r="2.5"/><path d="M12 4v3M12 17v3"/></svg>
+        <h3>Sync over Logos</h3>
+        <p>By default Perun uses the phone's shared <a href="https://vpavlin.github.io/loam/" style="color:var(--primary-2)">Loam</a> node, which serves all your Logos apps. Without Loam, it runs its own node. Recording never needs a network; you sync when you're ready.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- FILM highlight (interactive) -->
+<!-- SCREENS -->
+<section class="section" id="screens" style="padding-top:20px">
+  <div class="wrap">
+    <span class="eyebrow">Screens</span>
+    <h2>On the phone and on the desk.</h2>
+    <div class="gallery">
+      <figure><img src="assets/screens/record.png" alt="Recording a run: live stats over the map" loading="lazy" onerror="this.closest('figure').remove()"><figcaption>Recording: live stats and map</figcaption></figure>
+      <figure><img src="assets/screens/run.png" alt="Run detail with map, splits and elevation chart" loading="lazy" onerror="this.closest('figure').remove()"><figcaption>Run detail: splits and elevation</figcaption></figure>
+      <figure><img src="assets/screens/annotate.png" alt="Adding a photo or voice note to a point on the route" loading="lazy" onerror="this.closest('figure').remove()"><figcaption>Annotating a point</figcaption></figure>
+      <figure><img src="assets/screens/pair.png" alt="Pairing screen showing the three-word fingerprint" loading="lazy" onerror="this.closest('figure').remove()"><figcaption>Pairing: compare three words</figcaption></figure>
+      <figure><img src="assets/screens/video.png" alt="A frame of a replay video: route over a satellite map with a photo card" loading="lazy" onerror="this.closest('figure').remove()"><figcaption>A frame from a replay video</figcaption></figure>
+      <figure class="wide"><img src="assets/screens/desktop.png" alt="Perun Analytics in Basecamp" loading="lazy" onerror="this.closest('figure').remove()"><figcaption>Perun Analytics on Basecamp</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<!-- FILM preview (interactive mock-up) -->
 <section class="film section" id="film">
   <div class="wrap">
-    <span class="eyebrow">New · try the controls</span>
+    <span class="eyebrow">Replay video · options</span>
     <h2>Turn a ride into a film.</h2>
-    <p class="intro">Perun renders a cinematic video of your ride, entirely on-device — the route drawing itself across the map, your annotation photos rising as the dot passes them. These are the app's real export controls. Flip them and watch the frame change.</p>
+    <p class="intro">The app draws your route across the map and brings up your photos and voice notes as the dot passes them. It renders the video on the phone and saves it as MP4. The widget below is a <b style="color:var(--text)">simplified preview</b> of the export options, not a screenshot. The video at the top of the page is the real thing.</p>
     <div class="studio">
       <div class="stage-wrap">
         <div class="stage" id="stage" data-ratio="square" data-base="none" data-photo="card" data-wm="on" style="--card:.5">
@@ -311,6 +376,7 @@
           <div class="stat">12.4<span style="font-size:.6rem"> km</span><b>4:52 /km</b></div>
           <img class="wm" src="logo.png" alt="">
         </div>
+        <div class="stage-note">Preview · illustration of the options, not app output</div>
       </div>
       <div class="panel">
         <div class="ctl" data-group="ratio">
@@ -325,8 +391,8 @@
           <span class="lab">Basemap</span>
           <div class="chips">
             <button class="chip on" data-val="none"><span class="t">None</span><span class="h">offline</span></button>
-            <button class="chip" data-val="streets"><span class="t">Streets</span></button>
-            <button class="chip" data-val="satellite"><span class="t">Satellite</span></button>
+            <button class="chip" data-val="streets"><span class="t">Streets</span><span class="h">OSM</span></button>
+            <button class="chip" data-val="satellite"><span class="t">Satellite</span><span class="h">Esri</span></button>
           </div>
         </div>
         <div class="ctl" data-group="photo">
@@ -354,7 +420,59 @@
         </div>
       </div>
     </div>
-    <p class="intro" style="margin-top:26px; max-width:62ch">No upload, no render farm, nothing leaves your phone. A paused stretch even shows honestly, as a dashed bridge — because a film of your ride should be true to it.</p>
+    <p class="intro" style="margin-top:26px; max-width:66ch">With basemap <b style="color:var(--text)">None</b>, the video renders fully offline on a plain background. <b style="color:var(--text)">Streets</b> and <b style="color:var(--text)">Satellite</b> download map tiles from OpenStreetMap and Esri ArcGIS while rendering, so those servers see which area you requested. The video itself is never uploaded. A paused stretch of the ride is drawn as a dashed bridge, so the video stays true to what happened.</p>
+  </div>
+</section>
+
+<!-- PRIVACY -->
+<section class="section" id="privacy">
+  <div class="wrap">
+    <span class="eyebrow">How it works · privacy model</span>
+    <h2>Pairing is the whole key.</h2>
+    <p class="intro">There's no account. Your phone and your Basecamp share one secret, and everything Perun sends is sealed with keys derived from it.</p>
+    <div class="priv">
+      <div class="col">
+        <h3>Pair once</h3>
+        <ol>
+          <li>In Basecamp, open Perun Analytics and choose <b>Pair phone</b>. It shows a QR code and a <span class="mono">perun://pair</span> link.</li>
+          <li>In the app, open pairing and scan the QR, or paste the link.</li>
+          <li>Both screens show the same <b>3-word fingerprint</b>. If the words match, you are paired with the right device.</li>
+        </ol>
+        <div class="fp" aria-label="Example fingerprint"><span>prefer</span><span>microwave</span><span>skullcap</span></div>
+        <div class="note">Example fingerprint. Yours will be different.</div>
+      </div>
+      <div class="col">
+        <h3>What is sealed, and who sees what</h3>
+        <ul>
+          <li><b>Keys come from the pair secret.</b> The 256-bit secret travels only in the QR or link. Both devices derive the encryption key, the Logos topic and the fingerprint from it (HKDF-SHA256).</li>
+          <li><b>Every message is sealed</b> (runs, annotations, sync requests) with ChaCha20-Poly1305, bound to the topic.</li>
+          <li><b>Relay and store nodes</b> on the Logos network carry only ciphertext on a random-looking topic. They can see that a message passed, its size and its timing, but not the route or who you are.</li>
+          <li><b>Photos and voice notes</b> are sealed on the phone and uploaded to an attachment server you set (Perun Core on your desktop runs one). The server only holds ciphertext. Text notes need no server.</li>
+          <li><b>Map tiles</b> for the in-app map and the video basemaps come from OpenStreetMap and Esri ArcGIS, so those services see the map area you view.</li>
+        </ul>
+        <div class="note">Spec and test vectors: <a href="https://github.com/vpavlin/perun/blob/master/docs/pairing-crypto.md">docs/pairing-crypto.md</a>.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MYTH -->
+<section class="myth section" id="myth">
+  <div class="wrap grid">
+    <div>
+      <span class="eyebrow">The myth</span>
+      <blockquote>What is yours should stay yours — and what comes for it should be met with <span class="p">thunder</span>.</blockquote>
+      <svg class="bolt" viewBox="0 0 120 260" fill="none" aria-hidden="true">
+        <path d="M70 4 L26 140 L60 140 L44 256 L104 108 L66 108 Z" fill="#f0883e" opacity=".16"/>
+        <path d="M70 4 L26 140 L60 140 L44 256 L104 108 L66 108 Z" stroke="#f0883e" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div>
+      <p>Perun is the Slavic god of thunder and the storm — sky-father, lord of the sacred oak, keeper of order. He rides the heavens in a chariot of fire, and in his hand is the axe of lightning that always returns to him once thrown.</p>
+      <p>His eternal adversary is <b>Veles</b>, the horned serpent who lives among the roots of the world. Veles slips up from the dark to steal — cattle, waters, people — and drag them down to hoard where no light reaches. Each time, Perun hunts him across the sky and strikes, splitting oak and stone, until what was taken is returned. Then the rain falls, and the world is set right.</p>
+      <p>It is an old story about a simple idea, and it stands guard over the <b>Dark Forest</b> — the deep, unmapped place where a thing can stay hidden and safe.</p>
+      <p class="turn">Today the serpent wears a different face. Modern trackers take your movements, your routes, your home, and hoard them in databases you will never see. <b>Perun takes the old bargain back.</b> Your runs stay on your own devices, sealed with a key only they hold.</p>
+    </div>
   </div>
 </section>
 
@@ -363,27 +481,57 @@
   <div class="wrap">
     <span class="eyebrow">Install</span>
     <h2>Two halves, one private whole.</h2>
-    <p class="intro">The phone captures. The desktop analyses. They find each other over Logos — you never touch a server.</p>
+    <p class="intro">The phone records the runs and the desktop analyses them. They find each other over Logos.</p>
     <div class="cols">
       <div class="col">
         <h3>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.8"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/></svg>
-          Android
+          Android (arm64)
         </h3>
-        <p>Add the F-Droid repository below in your F-Droid client, then install <b style="color:var(--text)">Perun</b>. Signed, reproducible, updates in place.</p>
-        <code class="code">https://apps.vpavlin.xyz/fdroid/repo</code>
-        <div class="note">Or grab the signed APK from a <a href="https://github.com/vpavlin/perun/releases">GitHub release</a>.</div>
+        <ol>
+          <li>Add the repository in <a href="https://f-droid.org/" style="color:var(--primary-2)">F-Droid</a>: tap the link or scan the QR code on another phone.</li>
+          <li>Install <b>Perun</b>. Updates arrive through F-Droid.</li>
+          <li><b>Loam recommended:</b> install <b>Loam</b> from the same repo and approve Perun once. Then all your Logos apps share one node. Without Loam, Perun runs its own node.</li>
+        </ol>
+        <div class="qrrow">
+          <a href="https://apps.vpavlin.xyz/fdroid/repo?fingerprint=2373710A76ACB09F287F053E99E533F9D3685529C44E9027CDBC79B1DC0C9105"><img src="assets/fdroid-qr.svg" alt="QR code: add the apps.vpavlin.xyz F-Droid repository"></a>
+          <div class="fpr">Repo: https://apps.vpavlin.xyz/fdroid/repo<br><br>Fingerprint:<br>2373710A76ACB09F287F053E99E533F9D3685529C44E9027CDBC79B1DC0C9105</div>
+        </div>
+        <div class="note"><a href="https://apps.vpavlin.xyz/fdroid/repo?fingerprint=2373710A76ACB09F287F053E99E533F9D3685529C44E9027CDBC79B1DC0C9105">Add the repo to F-Droid →</a></div>
       </div>
       <div class="col">
         <h3>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.8"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-          Basecamp desktop
+          Basecamp 0.2.x (desktop)
         </h3>
-        <p>Add this package repository in Basecamp's package manager, then install <b style="color:var(--text)">Perun Analytics</b> for splits, elevation and history.</p>
-        <code class="code">https://apps.vpavlin.xyz/basecamp/logos-repo.json</code>
-        <div class="note">Browse every module at <a href="https://apps.vpavlin.xyz">apps.vpavlin.xyz</a>.</div>
+        <ol>
+          <li>In Basecamp's package manager, add this package repository:</li>
+        </ol>
+        <code class="code wrap">https://apps.vpavlin.xyz/logos-repo.json</code>
+        <ol start="2">
+          <li>Install <b class="mono">perun_analytics</b> (Perun Analytics). It pulls in <span class="mono">perun_core</span> and <span class="mono">loam_core</span> automatically.</li>
+          <li>Open it, choose <b>Pair phone</b>, and scan the QR code with the app.</li>
+        </ol>
+        <div class="note">Linux x86_64 for now. Basecamp 0.3 support is coming. Browse every module at <a href="https://apps.vpavlin.xyz/">apps.vpavlin.xyz</a>.</div>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- STATUS -->
+<section class="section status" id="status" style="padding-top:10px">
+  <div class="wrap">
+    <span class="eyebrow">Status &amp; limitations</span>
+    <h2>Honest about the edges.</h2>
+    <ul>
+      <li><b>The desktop is for analytics only.</b> You record on the phone. Basecamp receives, stores and analyses the runs.</li>
+      <li><b>Run sync is something you trigger.</b> Tap <i>Sync to Basecamp</i> on a run. Basecamp should be running at the time, or you can run your own always-on <span class="mono">perun_core</span> hub (optional). There is no public hub.</li>
+      <li><b>Photos and voice notes</b> need an attachment server the phone can reach. Text notes sync without one.</li>
+      <li><b>Map tiles need a network.</b> The basemap is fetched from OpenStreetMap or Esri. Recording and the no-basemap video work offline.</li>
+      <li><b>Android is arm64 only.</b> Basecamp 0.2.x on Linux x86_64. Basecamp 0.3 support is coming.</li>
+      <li><b>Bluetooth sync</b> through Loam is experimental and Android only.</li>
+    </ul>
+    <p class="ver">Current: Android 1.15.44 · perun_analytics 0.8.3 · perun_core 0.9.7</p>
   </div>
 </section>
 
@@ -393,12 +541,19 @@
       <img class="mark" src="logo.png" alt="">
       <span>Perun — run unseen.</span>
       <div class="links">
-        <a href="https://github.com/vpavlin/perun">GitHub</a>
-        <a href="https://apps.vpavlin.xyz">apps.vpavlin.xyz</a>
+        <a href="https://github.com/vpavlin/perun">Source on GitHub</a>
+        <a href="https://apps.vpavlin.xyz/">apps.vpavlin.xyz</a>
         <a href="https://logos.co">Logos</a>
       </div>
     </div>
-    <p class="fine">Built on the Logos stack — local-first data, peer-to-peer sync over Waku, no accounts and no clouds. A rebuild of the original <a href="https://github.com/vpavlin/perun-legacy">perun-legacy</a> as a native mobile app plus a Basecamp analytics module.</p>
+    <p class="fine">Part of a family of local-first apps on Logos → <a href="https://apps.vpavlin.xyz/">apps.vpavlin.xyz</a>. A rebuild of the original <a href="https://github.com/vpavlin/perun-legacy">perun-legacy</a> as a native Android app plus a Basecamp analytics module. Design decisions are recorded in the <a href="https://github.com/vpavlin/perun/tree/master/docs/adr">ADRs</a>.</p>
+    <p class="fine sibs">Siblings:
+      <a href="https://vpavlin.github.io/scala/">Scala</a>
+      <a href="https://vpavlin.github.io/qaku-logos/">QAKU</a>
+      <a href="https://github.com/vpavlin/kym">KYM</a>
+      <a href="https://vpavlin.github.io/kith/">Kith</a>
+      <a href="https://vpavlin.github.io/loam/">Loam</a>
+    </p>
   </div>
 </footer>
 
@@ -440,6 +595,10 @@
   sl.addEventListener('input', upd);
   upd(); fit();
   window.addEventListener('resize', fit);
+})();
+(function(){
+  var v=document.querySelector('.reel video');
+  if(v && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches){ v.removeAttribute('autoplay'); v.pause(); v.controls=true; }
 })();
 </script>
 
