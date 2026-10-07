@@ -93,7 +93,9 @@ void PerunCoreImpl::onContextReady() {
   openStoreAndLoad();
   loadOrCreateSecret();
   setStatusStr(QStringLiteral("Starting node…"));
-  QTimer::singleShot(0, [this]() { bootstrap(); });
+  // Logos 0.3.x rejects calls a module makes while it is still loading ("auth token not
+  // recognized"); 0 ms was not enough there, so wait 1 s (cf. scala startModules()).
+  QTimer::singleShot(1000, [this]() { bootstrap(); });
   if (m_hub)
     startHubTimer();
 }
