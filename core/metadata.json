@@ -1,7 +1,7 @@
 {
   "name": "perun_core",
   "display_name": "Perun Core",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "type": "core",
   "interface": "universal",
   "category": "fitness",
@@ -14,18 +14,15 @@
     "packages": {
       "build": [
         "zlib",
-        "openssl"
+        "openssl",
+        "sqlite"
       ],
       "runtime": [
-        "openssl"
+        "openssl",
+        "sqlite"
       ]
     },
-    "external_libraries": [
-      {
-        "name": "sqlite3",
-        "vendor_path": "vendor/sqlite"
-      }
-    ],
+    "external_libraries": [],
     "cmake": {
       "find_packages": [],
       "extra_sources": [],
