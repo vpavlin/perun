@@ -27,6 +27,7 @@ logos_module(
     SOURCES
         src/perun_core_impl.h
         src/perun_core_impl.cpp
+        src/perun_json.hpp
         src/blob_server.h
         src/blob_server.cpp
         src/perun_identity.h
