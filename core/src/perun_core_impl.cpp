@@ -1,4 +1,5 @@
 #include "perun_core_impl.h"
+#include "perun_json.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -335,8 +336,17 @@ void PerunCoreImpl::ingestSealed(const QByteArray &raw) {
       const std::string s =
           QString::fromUtf8(QJsonDocument(msgObj).toJson(QJsonDocument::Compact)).toStdString();
       nlohmann::json msg = nlohmann::json::parse(s, nullptr, false);
-      if (msg.is_object())
+      // A peer wrote this frame: anything respond() can't read safely (a missing "bounds",
+      // a numeric id) is dropped - it used to throw / assert-abort straight out of here.
+      if (!perun::catchupWellFormed(msg)) {
+        logEvent("rx SYNC_REQ malformed - dropped");
+        return;
+      }
+      try {
         onSyncReq(msg);
+      } catch (const std::exception &e) {
+        logEvent(std::string("rx SYNC_REQ failed: ") + e.what());
+      }
       return;
     }
 
