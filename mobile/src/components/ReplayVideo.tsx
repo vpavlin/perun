@@ -20,6 +20,7 @@ import { Run } from "../lib/types";
 import { Annotation, useAnnotations } from "../lib/annotations";
 import { localBlobUri, readFileBytes } from "../lib/blob";
 import { replayVideoHtml } from "../lib/replayVideoHtml";
+import { cleanAltitudes } from "../lib/analytics";
 import { getVideoPhotoPrefs, setVideoPhotoPrefs } from "../lib/settings";
 import { theme } from "../theme";
 
@@ -118,7 +119,10 @@ const BASEMAPS: { key: string; label: string }[] = [
 
 /** Build the JSON the WebView renderer consumes. */
 async function buildPayload(run: Run, annotations: Annotation[], dims: { w: number; h: number }, pace: number, basemap: string, watermark: string, photoMode: "card" | "hero", cardSize: number) {
-  const points = run.track.points.map((p) => ({ lat: p.lat, lon: p.lon, alt: p.alt ?? 0, t: p.t }));
+  // Same altitude cleaning as the stats + elevation chart (rolling median), so the video's
+  // elevation strip and gain don't show the source-switch spikes the app no longer counts.
+  const alts = cleanAltitudes(run.track.points);
+  const points = run.track.points.map((p, i) => ({ lat: p.lat, lon: p.lon, alt: alts[i] ?? p.alt ?? 0, t: p.t }));
   const anns = [];
   for (const a of annotations) {
     if (a.kind !== "text" && a.kind !== "photo" && a.kind !== "voice") continue;
